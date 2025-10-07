@@ -1,0 +1,21 @@
+{
+  "name": "engine",
+  "version": "1.0.0",
+  "description": "Exchange engine",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "dev": "ts-node-dev --respawn src/index.ts"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "redis": "^5.8.3",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.0",
+    "ts-node-dev": "^2.0.0"
+  }
+}

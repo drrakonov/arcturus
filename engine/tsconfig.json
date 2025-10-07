@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "module": "nodenext",              // ESM for Node
+    "moduleResolution": "nodenext",
+    "target": "ES2020",                // Modern JS syntax
+    "strict": true,
+    "esModuleInterop": true,           // import compat
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,      // preserve import syntax
+    "isolatedModules": true,
+    "types": ["node"],
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true
+  },
+  "include": ["src"]
+}
