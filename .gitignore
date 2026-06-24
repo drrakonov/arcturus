@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables - NEVER commit secrets
+.env
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Engine runtime state - regenerated on each start
+engine/snapshot.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

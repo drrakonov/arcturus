@@ -25,7 +25,7 @@ export type MessageFromOrderbook = {
         ]
     }
 } | {
-    type: "ORDER_CANELLED",
+    type: "ORDER_CANCELLED",
     payload: {
         orderId: string,
         executedQty: number,

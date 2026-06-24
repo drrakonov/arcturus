@@ -3,7 +3,7 @@ export const CANCEL_ORDER = "CANCEL_ORDER";
 export const ON_RAMP = "ON_RAMP";
 
 export const GET_DEPTH = "GET_DEPTH";
-export const GET_OPEN_ORDER = "GET_OPEN_ORDER";
+export const GET_OPEN_ORDERS = "GET_OPEN_ORDERS";
 
 export type MessageFromApi = {
     type: typeof CREATE_ORDER,
@@ -33,7 +33,7 @@ export type MessageFromApi = {
         market: string
     }
 } | {
-    type: typeof GET_OPEN_ORDER,
+    type: typeof GET_OPEN_ORDERS,
     data: {
         userId: string,
         market: string

@@ -2,7 +2,7 @@ import fs from 'fs';
 import { Orderbook, type Fill, type Order } from "./orderbook.js";
 import { RedisManager } from '../redisManager.js';
 import { ORDER_UPDATE, TRADE_ADDED } from '../types/types.js';
-import { CANCEL_ORDER, CREATE_ORDER, GET_DEPTH, GET_OPEN_ORDER, ON_RAMP, type MessageFromApi } from '../types/fromApi.js';
+import { CANCEL_ORDER, CREATE_ORDER, GET_DEPTH, GET_OPEN_ORDERS, ON_RAMP, type MessageFromApi } from '../types/fromApi.js';
 
 export const BASE_CURRENCY = "INR";
 
@@ -16,6 +16,7 @@ interface UserBalance {
 export class Engine {
     private orderbooks: Orderbook[] = [];
     private balances: Map<string, UserBalance> = new Map();
+    private usedTxnIds: Set<string> = new Set();
 
     constructor() {
         let snapshot = null;
@@ -58,6 +59,8 @@ export class Engine {
     }
 
     process({ message, clientId }: {message: MessageFromApi, clientId: string}) {
+        console.log(message);
+        console.log("Messaged reached to process");
         switch(message.type) {
             case CREATE_ORDER:
                 try {
@@ -88,18 +91,37 @@ export class Engine {
                     const cancelMarket = message.data.market;
                     const cancelOrderbook = this.orderbooks.find(orderbook => orderbook.ticker() === cancelMarket);
                     const quoteAsset = cancelMarket.split("_")[1];
-                    if(!cancelOrderbook) {
-                        throw new Error("Orderbook not found");
-                    } 
 
-                    const order = cancelOrderbook.asks.find(ask => ask.orderId === orderId) || cancelOrderbook.bids.find(bid => bid.orderId === orderId);
+                    if(!cancelOrderbook) {
+                        console.log("CANCEL_ORDER: orderbook not found for market:", cancelMarket);
+                        RedisManager.getInstance().sendToApi(clientId, {
+                            type: "ORDER_CANCELLED",
+                            payload: { orderId, executedQty: 0, remainingQty: 0 }
+                        });
+                        break;
+                    }
+
+                    const order = cancelOrderbook.asks.find(ask => ask.orderId === orderId)
+                                || cancelOrderbook.bids.find(bid => bid.orderId === orderId);
+
                     if(!order) {
-                        console.log("No order found");
-                        throw new Error("No Order found");
+                        console.log("CANCEL_ORDER: order not found:", orderId);
+                        RedisManager.getInstance().sendToApi(clientId, {
+                            type: "ORDER_CANCELLED",
+                            payload: { orderId, executedQty: 0, remainingQty: 0 }
+                        });
+                        break;
                     }
 
                     const userBalance = this.balances.get(order.userId);
-                    if(!userBalance) throw new Error("User not found");                
+                    if(!userBalance) {
+                        console.log("CANCEL_ORDER: user balance not found for userId:", order.userId);
+                        RedisManager.getInstance().sendToApi(clientId, {
+                            type: "ORDER_CANCELLED",
+                            payload: { orderId, executedQty: 0, remainingQty: 0 }
+                        });
+                        break;
+                    }
 
                     if(order.side === "buy") {
                         const price = cancelOrderbook.cancelBid(order);
@@ -127,14 +149,19 @@ export class Engine {
                         payload: {
                             orderId,
                             executedQty: 0,
-                            remainingQty: 0
+                            remainingQty: order.quantity - order.filled
                         }
-                    })
+                    });
                 }catch(err) {
-                    console.log("Error while cancelling order", err);
+                    // Only reaches here on unexpected runtime errors (not business-logic failures)
+                    console.error("CANCEL_ORDER: unexpected error:", err);
+                    RedisManager.getInstance().sendToApi(clientId, {
+                        type: "ORDER_CANCELLED",
+                        payload: { orderId: message.data.orderId, executedQty: 0, remainingQty: 0 }
+                    });
                 }
                 break;
-            case GET_OPEN_ORDER:
+            case GET_OPEN_ORDERS:
                 try {
                     const openOrderbook = this.orderbooks.find(o => o.ticker() === message.data.market);
                     if(!openOrderbook) {
@@ -142,6 +169,7 @@ export class Engine {
                     }
 
                     const openOrders = openOrderbook.getOpenOrders(message.data.userId);
+                    console.log(openOrders);
                     
                     RedisManager.getInstance().sendToApi(clientId, {
                         type: "OPEN_ORDERS",
@@ -155,6 +183,11 @@ export class Engine {
                 const userId = message.data.userId;
                 const txnId = message.data.txnId;
                 const amount = Number(message.data.amount);
+                if(this.usedTxnIds.has(txnId)) {
+                    console.log("Duplicate txnId rejected:", txnId);
+                    break;
+                }
+                this.usedTxnIds.add(txnId);
                 this.onRamp(userId, amount);
                 break;
             case GET_DEPTH:
@@ -196,7 +229,7 @@ export class Engine {
             throw new Error("No orderbook found");
         }
 
-        this.checkAndLockFunds(baseAsset, quoteAsset, side, userId, quoteAsset, price, quantity);
+        this.checkAndLockFunds(baseAsset, quoteAsset, side, userId, price, quantity);
 
         const order: Order = {
             price: Number(price),
@@ -240,8 +273,8 @@ export class Engine {
             RedisManager.getInstance().pushMessage({
                 type: ORDER_UPDATE,
                 data: {
-                    orderId: order.orderId,
-                    executedQty: executedQty,
+                    orderId: fill.markerOrderId,
+                    executedQty: fill.qty,
                 }
             });
         })
@@ -252,7 +285,7 @@ export class Engine {
             RedisManager.getInstance().pushMessage({
                 type: TRADE_ADDED,
                 data: {
-                    id: userId,
+                    id: fill.tradeId.toString(),
                     isBuyerMaker: fill.otherUserId === userId,
                     price: fill.price,
                     quantity: fill.qty.toString(),
@@ -320,15 +353,16 @@ export class Engine {
                 }
             });
         }else {
-            const updateAsks = depth.asks.filter(x => fills.map(f => f.price).includes(x[0].toString()));
-            const updateBids = depth.bids.filter(x => x[0] === price);
+            // For a sell: bids at filled prices are consumed; the new ask sits at `price`
+            const updateBids = depth.bids.filter(x => fills.map(f => f.price).includes(x[0].toString()));
+            const updateAsks = depth.asks.filter(x => x[0] === price);
             console.log("publish ws depth updates");
 
             RedisManager.getInstance().publishMessage(`depth@${market}`, {
                 stream: `depth@${market}`,
                 data: {
-                    a: updateAsks? updateAsks : [],
-                    b: updateBids,
+                    a: updateAsks.length ? updateAsks : [[price, "0"]],
+                    b: updateBids.length ? updateBids : [],
                     e: "depth"
                 }
             });
@@ -384,7 +418,6 @@ export class Engine {
         quoteAsset: string,
         side: "buy" | "sell",
         userId: string,
-        asset: string,
         price: string,
         quantity: string
     ) {
@@ -397,6 +430,7 @@ export class Engine {
         }
 
         if(side === "buy") {
+            console.log("user balance", userBalance);
 
             if(!userBalance || !userBalance[quoteAsset]) {
                 throw new Error("User or asset not found");

@@ -61,6 +61,7 @@ export class Orderbook {
                 }
             }
             this.bids.push(order);
+            console.log("Order matched")
             return {
                 executedQty,
                 fills
@@ -75,6 +76,7 @@ export class Orderbook {
                 }
             }
             this.asks.push(order);
+            console.log("Order matched")
             return {
                 executedQty,
                 fills
@@ -86,9 +88,12 @@ export class Orderbook {
         const fills: Fill[] = [];
         let executedQty = 0;
 
+        // Sort asks ascending so the buyer always gets the best (lowest) price first
+        this.asks.sort((a, b) => a.price - b.price);
+
         for (let i = 0; i < this.asks.length; i++) {
             if (this.asks[i].price <= order.price && executedQty < order.quantity) {
-                const filledQty = Math.min(this.asks[i].quantity, (order.quantity - executedQty));
+                const filledQty = Math.min(this.asks[i].quantity - this.asks[i].filled, (order.quantity - executedQty));
                 executedQty += filledQty;
                 this.asks[i].filled += filledQty;
                 fills.push({
@@ -108,7 +113,6 @@ export class Orderbook {
             }
         }
 
-
         return {
             fills,
             executedQty
@@ -120,9 +124,12 @@ export class Orderbook {
         const fills: Fill[] = [];
         let executedQty = 0;
 
+        // Sort bids descending so the seller always gets the best (highest) price first
+        this.bids.sort((a, b) => b.price - a.price);
+
         for(let i = 0; i < this.bids.length; i++) {
             if(this.bids[i].price >= order.price && executedQty < order.quantity) {
-                const amountRemaining = Math.min((order.quantity - executedQty), this.bids[i].quantity);
+                const amountRemaining = Math.min((order.quantity - executedQty), this.bids[i].quantity - this.bids[i].filled);
                 executedQty += amountRemaining;
                 this.bids[i].filled += amountRemaining;
                 fills.push({
@@ -137,7 +144,7 @@ export class Orderbook {
 
         for(let i = 0; i < this.bids.length; i++) {
             if(this.bids[i].quantity === this.bids[i].filled) {
-                this.bids.slice(i, 1);
+                this.bids.splice(i, 1);
                 i--;
             }
         }
@@ -160,7 +167,8 @@ export class Orderbook {
             if(!bidsObj[order.price]) {
                 bidsObj[order.price] = 0;
             }
-            bidsObj[order.price] += order.quantity;
+            // Use remaining (unfilled) quantity so depth reflects actual available volume
+            bidsObj[order.price] += (order.quantity - order.filled);
         }
 
         for(let i = 0; i < this.asks.length; i++) {
@@ -168,7 +176,8 @@ export class Orderbook {
             if(!asksObj[order.price]) {
                 asksObj[order.price] = 0;
             }
-            asksObj[order.price] += order.quantity;
+            // Use remaining (unfilled) quantity so depth reflects actual available volume
+            asksObj[order.price] += (order.quantity - order.filled);
         }
 
         for(const price in bidsObj) {
@@ -196,7 +205,7 @@ export class Orderbook {
         const index = this.bids.findIndex(x => x.orderId === order.orderId);
         if(index !== -1) {
             const price = this.bids[index].price;
-            this.bids.slice(index, 1);
+            this.bids.splice(index, 1);
             return price;
         }
     }

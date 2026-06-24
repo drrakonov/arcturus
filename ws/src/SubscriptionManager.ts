@@ -9,16 +9,23 @@ export class SubscriptionManager {
     private redisClient: RedisClientType;
 
     private constructor() {
-        //connect the websocket server to external redis pubsub...
         this.redisClient = createClient();
-        //this.redisClient.on("connect", () => console.log("✅ Connected to Redis"));
-        this.redisClient.connect();
         console.log("Connecting to redis...");
+    }
+
+    // Call once at startup with await before the WS server accepts connections
+    public static async connect(): Promise<SubscriptionManager> {
+        if (!this.instance) {
+            this.instance = new SubscriptionManager();
+            await this.instance.redisClient.connect();
+            console.log("SubscriptionManager: Redis client connected.");
+        }
+        return this.instance;
     }
 
     public static getInstance() {
         if (!this.instance) {
-            this.instance = new SubscriptionManager();
+            throw new Error("SubscriptionManager not initialized. Call SubscriptionManager.connect() first.");
         }
         return this.instance;
     }

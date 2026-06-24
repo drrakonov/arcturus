@@ -5,9 +5,11 @@
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
+    "build": "tsc -b",
     "start": "node dist/index.js",
-    "build": "tsc",
-    "dev": "ts-node-dev --respawn src/index.ts"
+    "dev": "npm run build && npm run start",
+    "dev:fresh": "rm -f snapshot.json && npm run build && npm run start",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
