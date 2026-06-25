@@ -11,6 +11,11 @@ services:
       POSTGRES_PASSWORD: your_password
     volumes:
       - timescale-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U your_user -d my_database"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine
@@ -18,6 +23,30 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  db-processor:
+    build:
+      context: ../db-processor
+      dockerfile: Dockerfile
+    container_name: db-processor
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: timescaledb
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: my_database
+      POSTGRES_USER: your_user
+      POSTGRES_PASSWORD: your_password
+      REDIS_URL: redis://redis:6379
 
 volumes:
   timescale-data:

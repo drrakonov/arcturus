@@ -1,0 +1,22 @@
+{
+  "name": "db-processor",
+  "version": "1.0.0",
+  "description": "Persists trade and order data from the Redis db_processor queue into TimescaleDB",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/index.js",
+    "dev": "npm run build && npm run start"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "pg": "^8.16.0",
+    "redis": "^5.8.3",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.0",
+    "@types/pg": "^8.11.14"
+  }
+}
