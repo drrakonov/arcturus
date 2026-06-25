@@ -30,7 +30,10 @@ async function main(): Promise<void> {
         shuttingDown = true;
         console.log(`\n[db-processor] Received ${signal}, shutting down…`);
         try {
-            await redis.quit();
+            // disconnect() immediately drops the TCP connection, which causes
+            // the in-flight brPop to throw, allowing the loop to exit cleanly.
+            // quit() deadlocks here because brPop holds the connection open.
+            await redis.disconnect();
             await closePool();
         } catch (err) {
             console.error("[db-processor] Error during shutdown:", err);
@@ -45,8 +48,9 @@ async function main(): Promise<void> {
     while (!shuttingDown) {
         let raw: string | null = null;
         try {
-            // brPop blocks until a message arrives (0 = wait indefinitely)
-            const result = await redis.brPop(QUEUE_KEY, 0);
+            // brPop with a 1-second timeout: wakes up every second so the
+            // shuttingDown flag is checked and Ctrl+C responds immediately.
+            const result = await redis.brPop(QUEUE_KEY, 1);
             raw = result?.element ?? null;
         } catch (err) {
             // brPop throws when the client is closed during shutdown
