@@ -6,6 +6,7 @@ import orderRouter from './routes/order.routes.js';
 import depthRouter from './routes/depth.routes.js';
 import tradesRouter from './routes/trades.routes.js';
 import klinesRouter from './routes/klines.routes.js';
+import tickersRouter from './routes/tickers.routes.js';
 import { RedisManager } from './managers/redisManager.js';
 
 const app = express();
@@ -18,7 +19,7 @@ app.use("/api/v1/order", orderRouter);
 app.use("/api/v1/depth", depthRouter);
 app.use("/api/v1/trades", tradesRouter);
 app.use("/api/v1/klines", klinesRouter);
-//app.use("/api/v1/tickers", );
+app.use("/api/v1/tickers", tickersRouter);
 
 
 
