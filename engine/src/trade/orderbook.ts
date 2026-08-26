@@ -96,6 +96,7 @@ export class Orderbook {
                 const filledQty = Math.min(this.asks[i].quantity - this.asks[i].filled, (order.quantity - executedQty));
                 executedQty += filledQty;
                 this.asks[i].filled += filledQty;
+                this.currentPrice = this.asks[i].price; // ← track last traded price
                 fills.push({
                     price: this.asks[i].price.toString(),
                     qty: filledQty,
@@ -132,6 +133,7 @@ export class Orderbook {
                 const amountRemaining = Math.min((order.quantity - executedQty), this.bids[i].quantity - this.bids[i].filled);
                 executedQty += amountRemaining;
                 this.bids[i].filled += amountRemaining;
+                this.currentPrice = this.bids[i].price; // ← track last traded price
                 fills.push({
                     price: this.bids[i].price.toString(),
                     qty: amountRemaining,

@@ -55,4 +55,15 @@ export class RedisManager {
             }))
         })
     }
+
+    /**
+     * Sends a message to the engine queue without waiting for a reply.
+     * Use for fire-and-forget messages like CREATE_MARKET.
+     */
+    public sendFireAndForget(message: MessageToEngine) {
+        this.publisher.lPush("message", JSON.stringify({
+            clientId: "internal",
+            message
+        })).catch((err) => console.error("[RedisManager] sendFireAndForget failed:", err));
+    }
 }

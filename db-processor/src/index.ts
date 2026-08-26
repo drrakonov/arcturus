@@ -84,7 +84,7 @@ async function main(): Promise<void> {
             }
         } catch (err) {
             console.error(`[db-processor] Failed to persist message (type=${message.type}):`, err);
-            // TODO (Phase 3+): push to a dead-letter queue instead of dropping
+            // push to a dead-letter queue instead of dropping
         }
     }
 }

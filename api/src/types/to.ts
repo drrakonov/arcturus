@@ -1,4 +1,4 @@
-import type { CANCEL_ORDER, CREATE_ORDER, GET_DEPTH, GET_OPEN_ORDERS, ON_RAMP } from "./status.js"
+import type { CANCEL_ORDER, CREATE_ORDER, GET_DEPTH, GET_OPEN_ORDERS, ON_RAMP, CREATE_MARKET } from "./status.js"
 
 export type MessageToEngine = {
     type: typeof CREATE_ORDER,
@@ -32,5 +32,10 @@ export type MessageToEngine = {
     data: {
         userId: string,
         market: string
+    }
+} | {
+    type: typeof CREATE_MARKET,
+    data: {
+        baseAsset: string
     }
 }

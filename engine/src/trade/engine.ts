@@ -2,7 +2,7 @@ import fs from 'fs';
 import { Orderbook, type Fill, type Order } from "./orderbook.js";
 import { RedisManager } from '../redisManager.js';
 import { ORDER_UPDATE, TRADE_ADDED } from '../types/types.js';
-import { CANCEL_ORDER, CREATE_ORDER, GET_DEPTH, GET_OPEN_ORDERS, ON_RAMP, type MessageFromApi } from '../types/fromApi.js';
+import { CANCEL_ORDER, CREATE_ORDER, GET_DEPTH, GET_OPEN_ORDERS, ON_RAMP, CREATE_MARKET, type MessageFromApi } from '../types/fromApi.js';
 
 export const BASE_CURRENCY = "INR";
 
@@ -212,6 +212,21 @@ export class Engine {
                     })
                 }
                 break;
+
+            case CREATE_MARKET:
+                try {
+                    const { baseAsset } = message.data;
+                    const exists = this.orderbooks.find(o => o.baseAsset === baseAsset);
+                    if (exists) {
+                        console.log(`CREATE_MARKET: market ${baseAsset}_${BASE_CURRENCY} already exists`);
+                        break;
+                    }
+                    this.addOrderbook(new Orderbook(baseAsset, [], [], 0, 0));
+                    console.log(`CREATE_MARKET: created ${baseAsset}_${BASE_CURRENCY}`);
+                } catch(err) {
+                    console.error("CREATE_MARKET: failed", err);
+                }
+                break;
         }
     }
 
@@ -247,6 +262,7 @@ export class Engine {
         this.updateDbOrders(order, executedQty, fills, market);
         this.publishWsDepthUpdates(market, side, fills, price);
         this.publishWsTrades(fills, userId, market);
+        this.publishWsTicker(market, fills, orderbook.currentPrice);
 
         return {
             executedQty,
@@ -297,7 +313,7 @@ export class Engine {
         })
     }
 
-    publishWsTrades(fills: Fill[],userId: string, market: string) {
+    publishWsTrades(fills: Fill[], userId: string, market: string) {
         fills.map(fill => {
             RedisManager.getInstance().publishMessage(`trade@${market}`, {
                 stream: `trade@${market}`,
@@ -312,6 +328,32 @@ export class Engine {
             });
         })
     }
+
+    publishWsTicker(market: string, fills: Fill[], currentPrice: number) {
+        // Only publish if there were actual fills — no trades means no price update
+        if (fills.length === 0) return;
+
+        const prices  = fills.map(f => Number(f.price));
+        const high    = Math.max(...prices).toString();
+        const low     = Math.min(...prices).toString();
+        const volume  = fills.reduce((sum, f) => sum + f.qty, 0).toString();
+        const quoteVol = fills.reduce((sum, f) => sum + f.qty * Number(f.price), 0).toString();
+
+        RedisManager.getInstance().publishMessage(`ticker@${market}`, {
+            stream: `ticker@${market}`,
+            data: {
+                e: "ticker",
+                id: Date.now(),
+                s: market,
+                c: currentPrice.toString(),   // close / last price
+                h: high,
+                l: low,
+                v: volume,                    // base asset volume
+                V: quoteVol                   // quote asset volume
+            }
+        });
+    }
+
 
     sendUpdatedDepthAt(price: string, market: string) {
         const orderbook = this.orderbooks.find(o => o.ticker() === market);
