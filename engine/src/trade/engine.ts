@@ -440,6 +440,12 @@ export class Engine {
 
                 //update baseAsset
                 userBalance[baseAsset].locked -= fill.qty;
+
+                // Buyer may not have the base asset yet for example => funded via ON_RAMP
+                // which only creates INR Initialise it before crediting.
+                if (!otherUserBalance[baseAsset]) {
+                    otherUserBalance[baseAsset] = { available: 0, locked: 0 };
+                }
                 otherUserBalance[baseAsset].available += fill.qty;
 
                 //update quoteAsset
