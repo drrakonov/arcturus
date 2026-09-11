@@ -3,8 +3,6 @@
 
 Arcturus is a full-stack exchange engine inspired by how platforms like Binance work internally. It implements a **price-time priority matching engine**, **real-time WebSocket market data**, **asynchronous persistence via TimescaleDB**, and a **self-sustaining market maker bot** — all connected through a Redis message bus.
 
-![All Services Running](./assets/images/all-services.png)
-
 ---
 
 ## 🏗️ Architecture
@@ -92,6 +90,31 @@ All benchmarks run with **Autocannon** (`-c 50 connections, -d 10 seconds`) on l
 
 > **Note:** Higher latency here is expected — this endpoint scans real TimescaleDB rows with full time-series aggregation, unlike the in-memory depth endpoint.
 
+---
+
+## 🎬 Live Demos
+
+### Market Maker Bot — Automated Liquidity
+
+The Market Maker runs as an independent microservice, continuously placing and cancelling orders every 2 seconds to keep the book alive. No human users needed.
+
+![Market Maker Demo](./assets/gifs/demo-market-maker.gif)
+
+---
+
+### Real-Time Order Execution
+
+Live order matching and trade execution streamed through the full pipeline.
+
+![Order Execution Demo](./assets/gifs/demo-order-executions.gif)
+
+---
+
+### Sell Orders Under Load
+
+Stress test showing sell order processing with concurrent connections active.
+
+![Sell Orders Demo](./assets/gifs/demo-sell-orders.gif)
 
 ---
 
@@ -177,33 +200,6 @@ wscat -c ws://localhost:3001
 ```
 
 ---
-
-## 🎬 Live Demos
-
-### Market Maker Bot — Automated Liquidity
-
-The Market Maker runs as an independent microservice, continuously placing and cancelling orders every 2 seconds to keep the book alive. No human users needed.
-
-![Market Maker Demo](./assets/gifs/demo-market-maker.gif)
-
----
-
-### Real-Time Order Execution
-
-Live order matching and trade execution streamed through the full pipeline.
-
-![Order Execution Demo](./assets/gifs/demo-order-executions.gif)
-
----
-
-### Sell Orders Under Load
-
-Stress test showing sell order processing with concurrent connections active.
-
-![Sell Orders Demo](./assets/gifs/demo-sell-orders.gif)
-
----
-
 
 ## 🔑 Key Design Decisions
 
