@@ -1,41 +1,14 @@
 import { createClient, type RedisClientType } from "redis"
-import type { ORDER_UPDATE, TRADE_ADDED } from "./types/types.js"
 import type { WsMessage } from "./types/toWs.js"
 import type { MessageToApi } from "./types/toApi.js"
-
-
-
-type DbMessage = {
-    type: typeof TRADE_ADDED,
-    data: {
-        id: string,
-        isBuyerMaker: Boolean,
-        price: string,
-        quantity: string,
-        quoteQuantity: string,
-        timestamp: number,
-        market: string
-    } 
-} | {
-    type: typeof ORDER_UPDATE,
-    data: {
-        orderId: string,
-        executedQty: number,
-        market?: string,
-        price?: string,
-        quantity?: string,
-        side?: "buy" | "sell",
-    }
-}
-
-
+import type { DbMessage } from "@arcturus/contracts";
 
 export class RedisManager {
     private client: RedisClientType;
     private static instance: RedisManager;
 
     private constructor() {
-        this.client = createClient();
+        this.client = createClient({ url: process.env.REDIS_URL || "redis://localhost:6379" });
     }
 
     // Call this ONCE at startup with await before the engine loop begins.

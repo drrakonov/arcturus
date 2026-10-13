@@ -1,13 +1,7 @@
 import { BASE_CURRENCY } from "./engine.js";
 
-export interface Order {
-    price: number;
-    quantity: number;
-    orderId: string;
-    filled: number;
-    side: "buy" | "sell";
-    userId: string;
-}
+import type { Order } from "@arcturus/contracts";
+export type { Order } from "@arcturus/contracts";
 
 export interface Fill {
     price: string,

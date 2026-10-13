@@ -1,7 +1,11 @@
 # Arcturus ⚡
-> A high-performance, real-time cryptocurrency exchange backend — built from scratch.
+> A simulated exchange backend with in-memory matching, Redis messaging and live market data.
 
-Arcturus is a full-stack exchange engine inspired by how platforms like Binance work internally. It implements a **price-time priority matching engine**, **real-time WebSocket market data**, **asynchronous persistence via TimescaleDB**, and a **self-sustaining market maker bot** — all connected through a Redis message bus.
+**Development status:** Milestone 0 local baseline is complete. Trading correctness fixes,
+frontend and public deployment are pending. See [PROGRESS.md](PROGRESS.md) for verified
+results and blockers. This is not ready for public trading, even with simulated funds.
+
+Arcturus is an exchange backend inspired by how platforms like Binance work internally. It implements a **price-time priority matching engine**, **real-time WebSocket market data**, **asynchronous persistence via TimescaleDB**, and a **self-sustaining market maker bot** — all connected through a Redis message bus.
 
 ---
 
@@ -38,7 +42,12 @@ Arcturus is a full-stack exchange engine inspired by how platforms like Binance 
 
 ## 📊 Performance Benchmarks
 
-All benchmarks run with **Autocannon** (`-c 50 connections, -d 10 seconds`) on localhost with the Market Maker bot simultaneously active.
+**Historical, unverified results:** the original screenshots and figures below are retained
+for provenance. Reproducible scripts are not present, and these results have not been
+validated against this revision. The trade endpoint now requires `symbol`; it reads
+trade rows, not a candle aggregate.
+
+Originally reported with **Autocannon** (`-c 50 connections, -d 10 seconds`) on localhost with the Market Maker bot simultaneously active.
 
 ---
 
@@ -88,7 +97,7 @@ All benchmarks run with **Autocannon** (`-c 50 connections, -d 10 seconds`) on l
 | **Throughput** | 2.49 MB/sec |
 | **Total** | **4,000 requests, 24.9 MB read in 10s** |
 
-> **Note:** Higher latency here is expected — this endpoint scans real TimescaleDB rows with full time-series aggregation, unlike the in-memory depth endpoint.
+> These figures do not establish current throughput or correctness. New reproducible benchmarks are scheduled for Milestone 7.
 
 ---
 
@@ -121,51 +130,58 @@ Stress test showing sell order processing with concurrent connections active.
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Docker & Docker Compose
-- Node.js v18+
+- Node.js 24 recommended (`.nvmrc`); supported baseline: Node 22.12–24.
+- npm and Docker with the Compose plugin.
+- Local-only demo: default database credentials are for development.
 
-### 1. Start Infrastructure
+### Install and build (from the repository root)
 ```bash
-cd docker && docker compose up -d
+npm run bootstrap
+npm run build
+npm run typecheck
+npm test
 ```
-This starts **Redis** and **TimescaleDB** with health checks.
+Each service retains its own lockfile. `bootstrap` runs `npm ci` in the contracts
+package and every service; `build` builds contracts before their consumers.
+No global TypeScript installation is needed.
 
-### 2. Install Dependencies
+### Configure
+Copy the `.env.example` in each service to `.env` if you need overrides. Service
+commands read their own working directory's `.env`. The API, engine and WS server
+use `REDIS_URL`; API and worker use the documented `POSTGRES_*` variables.
+The engine's `WITH_SNAPSHOT` must be empty for a fresh start or `1` to restore.
+The existing code treats any nonempty value (including `false`) as enabled.
+
+### Start
 ```bash
-cd api          && npm install
-cd ../engine    && npm install
-cd ../ws        && npm install
-cd ../db-processor && npm install
-cd ../market-maker && npm install
+npm run infra:up
+npm start
 ```
+Compose starts Redis, TimescaleDB **and exactly one database processor**. The root
+start command starts the engine, API and WebSocket server on the host, and stops the
+other host processes if one exits. It does not start a duplicate database processor.
+Database and Redis host ports bind to loopback only.
 
-### 3. Start All Services
-Open 4 terminals and run one per terminal:
-
+In a separate terminal, optionally start the simulator:
 ```bash
-# Terminal 1 — Matching Engine (fresh start)
-cd engine && npm run dev:fresh
-
-# Terminal 2 — REST API
-cd api && npm run dev
-
-# Terminal 3 — WebSocket Server
-cd ws && npm run dev
-
-# Terminal 4 — DB Processor
-cd db-processor && npm run dev
+npm run start:market-maker
 ```
+Stop the host services with Ctrl+C; stop infrastructure with `npm run infra:down`.
+The latter preserves the database volume. Do not run the simulator during smoke checks.
 
-### 4. (Optional) Start Market Maker
-```bash
-cd market-maker && npm run dev
-```
-
-### 5. Verify
+### Verification
 ```bash
 curl http://localhost:3000/
-# → "API Server is running...🚀"
 ```
+For a **fresh, disposable engine and database only**:
+```bash
+SMOKE_DISPOSABLE=1 npm run smoke
+```
+The smoke check places real simulated orders for seeded accounts 1 and 2 and checks
+HTTP responses, Redis-mediated matching, persisted trade history and WebSocket events.
+It does not certify balance correctness, candle refresh, durability or cloud readiness.
+It intentionally refuses to run without the disposable opt-in. Never run it against
+an active/shared demo. See [deployment gates](docs/deployment.md) for remaining checks.
 
 ---
 
@@ -181,7 +197,11 @@ curl http://localhost:3000/
 | `GET` | `/api/v1/trades` | Recent trade history |
 | `GET` | `/api/v1/klines` | OHLCV candlestick data (1m) |
 | `GET` | `/api/v1/tickers` | 24h ticker statistics |
-| `GET` | `/api/v1/markets` | List available markets |
+| `POST` | `/api/v1/markets` | Dispatch market creation (no engine acknowledgement) |
+
+Market-data reads require `?symbol=TATA_INR`; open orders require
+`?userId=1&market=TATA_INR`. Klines support only `interval=1m`.
+There is no market-list GET route, account/balance route, market-order type or frontend yet.
 
 ### Example — Place a Buy Order
 ```bash
@@ -201,23 +221,17 @@ wscat -c ws://localhost:3001
 
 ---
 
-## 🔑 Key Design Decisions
+## Architecture and current limits
 
-| Decision | Why |
-|---|---|
-| **Redis queue for API→Engine** | Serializes all orders — eliminates race conditions without complex locking |
-| **Single-threaded engine** | Guarantees price-time priority with zero concurrency bugs |
-| **In-memory orderbook** | Sub-millisecond matching — no DB in the hot path |
-| **Async DB writes** | Engine never waits for disk — keeps latency minimal |
-| **Snapshot every 3s** | Survives graceful restarts without losing open orders |
-| **TimescaleDB** | Automatic time-partitioning for 10x faster kline/trade queries |
+- One engine processes queued commands serially; multiple engine consumers would split state.
+- Orders and balances live in memory; snapshots are written every three seconds and on shutdown.
+- Snapshot restoration is opt-in, writes are not atomic, and pending events are not replayed.
+- Redis lists carry commands and persistence events; Pub/Sub carries replies and live data.
+- Database writes are asynchronous and currently lack reliable retry handling.
+- Known accounting, validation, ownership and depth-update defects are tracked in PROGRESS.md.
+- The default market is TATA_INR with seeded simulated users 1, 2 and 5.
 
----
-
-## 🔭 Future Improvements
-
-- [ ] Replace Redis lists with **Apache Kafka** for durable, replayable message delivery
-- [ ] Move balances to **PostgreSQL with row-level locking** for stateless engine sharding
-- [ ] Rewrite the matching engine core in **Rust or C++** for microsecond throughput
-- [ ] Add **WebSocket authentication** and per-user private channels
-- [ ] Implement **atomic snapshot writes** using temp file + rename
+The approved roadmap preserves this architecture and adds correctness, a trading frontend,
+execution inspection, controlled scenarios and reproducible benchmarks incrementally.
+Free deployment feasibility must pass before claiming a public demo. See
+[deployment notes](docs/deployment.md). No real funds or cryptocurrency custody is involved.

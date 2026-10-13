@@ -12,7 +12,7 @@ import { RedisManager } from './managers/redisManager.js';
 
 const app = express();
 app.use(cors({
-    origin: process.env.CORS_OROGIN
+    origin: process.env.CORS_ORIGIN || "http://localhost:5173"
 }));
 app.use(express.json());
 
