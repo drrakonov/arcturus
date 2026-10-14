@@ -2,8 +2,8 @@
 > A simulated exchange backend with in-memory matching, Redis messaging and live market data.
 
 **Development status:** Milestone 1 trading-core correctness and local integration are verified.
-Frontend, account ownership and public deployment are pending. See
-[trading-core behavior and verification](docs/trading-core.md) for guarantees and limitations.
+Frontend, account ownership and public deployment are pending. Current behavior,
+verification commands and limitations are described below.
 
 Arcturus is an exchange backend inspired by how platforms like Binance work internally. It implements a **price-time priority matching engine**, **real-time WebSocket market data**, **asynchronous persistence via TimescaleDB**, and a **self-sustaining market maker bot** — all connected through a Redis message bus.
 
@@ -181,10 +181,42 @@ SMOKE_DISPOSABLE=1 npm run smoke
 The smoke check places real simulated orders for seeded accounts 1 and 2 and checks
 HTTP responses, Redis-mediated matching, persisted trade history and WebSocket events.
 That baseline check does not certify balance correctness, candle refresh, durability or cloud readiness.
-The Milestone 1 suite separately checks exact settlement, conservation and cancellation;
-see [core verification](docs/trading-core.md).
 It intentionally refuses to run without the disposable opt-in. Never run it against
-an active/shared demo. See [deployment gates](docs/deployment.md) for remaining checks.
+an active/shared demo.
+
+`npm test` builds all packages and runs 21 tests, including exact settlement,
+price-time priority, refunds, cancellation, validation, snapshots and a seeded
+500-command conservation check. API controller tests substitute the Redis transport.
+
+For a real service integration check, start the disposable infrastructure (Compose
+2.24.4 or newer), then run:
+
+```bash
+docker compose -p arcturus-m0 \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.smoke.yml \
+  up -d --wait redis timescaledb
+SMOKE_DISPOSABLE=1 npm run test:integration
+```
+
+The runner starts host API/engine/WS/worker processes and checks fractional settlement,
+refunds, cancellation, error responses, persistence and WebSocket delivery. It requires
+unused Redis DB 15 on localhost:16379 and PostgreSQL on localhost:15432 with the local
+development credentials. It creates and removes its own database and queue keys, stops
+its host processes and leaves logs/snapshots in a temporary directory. Run it exclusively:
+Redis Pub/Sub channels are shared across logical databases. No Docker commands are run
+by the test script. Port overrides: `TEST_POSTGRES_PORT`, `TEST_REDIS_PORT`,
+`TEST_API_PORT`, `TEST_WS_PORT`.
+
+Stop the disposable containers afterward:
+
+```bash
+docker compose -p arcturus-m0 \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.smoke.yml stop
+```
+
+The disposable PostgreSQL data uses temporary memory storage and is discarded on stop.
 
 ---
 
@@ -205,6 +237,21 @@ an active/shared demo. See [deployment gates](docs/deployment.md) for remaining 
 Market-data reads require `?symbol=TATA_INR`; open orders require
 `?userId=1&market=TATA_INR`. Klines support only `interval=1m`.
 There is no market-list GET route, account/balance route, market-order type or frontend yet.
+
+### Trading rules
+
+- Positive decimal strings only: price tick `0.01`, quantity lot `0.0001`; each input
+  is capped at `1,000,000`. Invalid precision, zero and non-finite values are rejected.
+- BigInt arithmetic uses cents for prices, ten-thousandths for quantities and millionths
+  for balances. Matching executes at the maker's price, best price first, then FIFO.
+- Buy price improvement is refunded immediately. Cancellation releases only unfilled
+  reserves in the correct asset. Draft state is checked for conservation, exact reserves
+  and nonnegative balances before being committed.
+- Error responses have `success: false`, `code` and `message`: invalid input is HTTP 400,
+  unknown market/user/order is 404, insufficient funds is 422, capacity/duplicate funding
+  is 409, and unexpected failures are 500.
+- Demo limits: 32 markets, 10,000 resting orders per book, 1,000 accounts and 10,000
+  funding transaction IDs. Self-matching remains permitted for the simulator.
 
 ### Example — Place a Buy Order
 ```bash
@@ -232,10 +279,15 @@ wscat -c ws://localhost:3001
 - Redis lists carry commands and persistence events; Pub/Sub carries replies and live data.
 - Database writes are asynchronous and currently lack reliable retry handling.
 - Matching, settlement and cancellation use exact integer units and checked in-memory transactions.
-- Account ownership, reliable event delivery and full order lifecycle persistence remain pending.
+- Account ownership, request timeouts and reliable event delivery remain pending.
+- Maker database updates are additive; cancellations are not yet recorded as cancelled in SQL.
+- There is no coordinated engine/database restore: avoid mixing a fresh engine with old
+  history in a shared demo. Legacy snapshots are incompatible with version 2.
 - The default market is TATA_INR with seeded simulated users 1, 2 and 5.
 
 The approved roadmap preserves this architecture and adds correctness, a trading frontend,
 execution inspection, controlled scenarios and reproducible benchmarks incrementally.
-Free deployment feasibility must pass before claiming a public demo. See
-[deployment notes](docs/deployment.md). No real funds or cryptocurrency custody is involved.
+Deployment targets are AWS EC2 Free Tier or Render Free Tier, subject to eligibility
+and measured resource fit. Cloud provisioning, public HTTPS/WebSocket verification and
+full-stack resource measurements are deferred to Milestone 6; zero-cost deployment has
+not been verified. No real funds or cryptocurrency custody is involved.
