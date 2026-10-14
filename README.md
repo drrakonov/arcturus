@@ -1,9 +1,9 @@
 # Arcturus ⚡
 > A simulated exchange backend with in-memory matching, Redis messaging and live market data.
 
-**Development status:** Milestone 0 local baseline is complete. Trading correctness fixes,
-frontend and public deployment are pending. See [PROGRESS.md](PROGRESS.md) for verified
-results and blockers. This is not ready for public trading, even with simulated funds.
+**Development status:** Milestone 1 trading-core correctness and local integration are verified.
+Frontend, account ownership and public deployment are pending. See
+[trading-core behavior and verification](docs/trading-core.md) for guarantees and limitations.
 
 Arcturus is an exchange backend inspired by how platforms like Binance work internally. It implements a **price-time priority matching engine**, **real-time WebSocket market data**, **asynchronous persistence via TimescaleDB**, and a **self-sustaining market maker bot** — all connected through a Redis message bus.
 
@@ -150,7 +150,8 @@ Copy the `.env.example` in each service to `.env` if you need overrides. Service
 commands read their own working directory's `.env`. The API, engine and WS server
 use `REDIS_URL`; API and worker use the documented `POSTGRES_*` variables.
 The engine's `WITH_SNAPSHOT` must be empty for a fresh start or `1` to restore.
-The existing code treats any nonempty value (including `false`) as enabled.
+Other nonempty values are rejected. Version 2 integer snapshots are required; legacy
+floating-point snapshots must not be restored. Use an isolated fresh demo instead.
 
 ### Start
 ```bash
@@ -179,7 +180,9 @@ SMOKE_DISPOSABLE=1 npm run smoke
 ```
 The smoke check places real simulated orders for seeded accounts 1 and 2 and checks
 HTTP responses, Redis-mediated matching, persisted trade history and WebSocket events.
-It does not certify balance correctness, candle refresh, durability or cloud readiness.
+That baseline check does not certify balance correctness, candle refresh, durability or cloud readiness.
+The Milestone 1 suite separately checks exact settlement, conservation and cancellation;
+see [core verification](docs/trading-core.md).
 It intentionally refuses to run without the disposable opt-in. Never run it against
 an active/shared demo. See [deployment gates](docs/deployment.md) for remaining checks.
 
@@ -197,7 +200,7 @@ an active/shared demo. See [deployment gates](docs/deployment.md) for remaining 
 | `GET` | `/api/v1/trades` | Recent trade history |
 | `GET` | `/api/v1/klines` | OHLCV candlestick data (1m) |
 | `GET` | `/api/v1/tickers` | 24h ticker statistics |
-| `POST` | `/api/v1/markets` | Dispatch market creation (no engine acknowledgement) |
+| `POST` | `/api/v1/markets` | Create a market after engine validation and acknowledgement |
 
 Market-data reads require `?symbol=TATA_INR`; open orders require
 `?userId=1&market=TATA_INR`. Klines support only `interval=1m`.
@@ -228,7 +231,8 @@ wscat -c ws://localhost:3001
 - Snapshot restoration is opt-in, writes are not atomic, and pending events are not replayed.
 - Redis lists carry commands and persistence events; Pub/Sub carries replies and live data.
 - Database writes are asynchronous and currently lack reliable retry handling.
-- Known accounting, validation, ownership and depth-update defects are tracked in PROGRESS.md.
+- Matching, settlement and cancellation use exact integer units and checked in-memory transactions.
+- Account ownership, reliable event delivery and full order lifecycle persistence remain pending.
 - The default market is TATA_INR with seeded simulated users 1, 2 and 5.
 
 The approved roadmap preserves this architecture and adds correctness, a trading frontend,

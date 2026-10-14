@@ -1,4 +1,6 @@
-// Shared descriptions of the existing wire protocol; business validation is added in later milestones.
+export * from './validation.js';
+import type { ErrorCode } from './validation.js';
+// Shared wire contracts. Numeric order/fill fields are display values, never settlement inputs.
 export interface Order {
     price: number;
     quantity: number;
@@ -56,6 +58,12 @@ export type MessageFromApi = {
     }
 }
 export type MessageToApi = {
+    type: "ERROR",
+    payload: { code: ErrorCode; message: string }
+} | {
+    type: "ACK",
+    payload: { message: string }
+} | {
     type: "DEPTH",
     payload: {
         bids: [string, string][],

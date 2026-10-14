@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import dotenv from 'dotenv';
 dotenv.config();
 import { createClient } from 'redis';
@@ -7,7 +8,12 @@ import { RedisManager } from './redisManager.js';
 async function main() {
     await RedisManager.connect();
 
-    const engine = new Engine();
+    const restore = process.env.WITH_SNAPSHOT;
+    if (restore && restore !== '1') throw new Error('WITH_SNAPSHOT must be empty or 1');
+    const engine = new Engine({ sink: RedisManager.getInstance(),
+        ...(restore === '1' ? { snapshot: JSON.parse(fs.readFileSync('./snapshot.json', 'utf8')) } : {}) });
+    const saveSnapshot = () => fs.writeFileSync('./snapshot.json', JSON.stringify(engine.getSnapshot()));
+    const snapshotTimer = setInterval(saveSnapshot, 3000);
 
     const redisClient = createClient({ url: process.env.REDIS_URL || "redis://localhost:6379" });
     await redisClient.connect();
@@ -23,7 +29,8 @@ async function main() {
         if (shuttingDown) return;
         shuttingDown = true;
         console.log(`\n[engine] Received ${signal} — saving snapshot and exiting…`);
-        engine.saveSnapshot();
+        clearInterval(snapshotTimer);
+        saveSnapshot();
         redisClient.disconnect().catch(() => {});
         process.exit(0);
     }
@@ -49,4 +56,4 @@ async function main() {
     }
 }
 
-main();
+main().catch(error => { console.error('Engine startup failed:', error); process.exit(1); });
