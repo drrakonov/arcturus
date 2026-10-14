@@ -12,12 +12,13 @@ test('API maps validation/business errors to non-success status and payloads', a
   const original = RedisManager.getInstance;
   let dispatches = 0;
   RedisManager.getInstance = () => ({
-    sendAndAwait: async message => {
-      dispatches++; return engine.process({ message, clientId: 'test' });
+    sendAndAwait: async (message, requestId) => {
+      dispatches++; return engine.process({ message, clientId: 'test', requestId });
     }
   });
   const call = async (handler, req) => {
-    const res = { statusCode: 0, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+    req.get = () => crypto.randomUUID();
+    const res = { locals: { userId: '1' }, statusCode: 0, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
     await handler(req, res); return res;
   };
   try {
@@ -31,13 +32,13 @@ test('API maps validation/business errors to non-success status and payloads', a
     let res = await call(createOrder, { body: order });
     assert.equal(res.statusCode, 422); assert.equal(res.body.code, 'INSUFFICIENT_FUNDS');
     res = await call(createOrder, { body: { ...order, quantity: '1', userId: 'missing' } });
-    assert.equal(res.statusCode, 404); assert.equal(res.body.code, 'UNKNOWN_USER');
+    assert.equal(res.statusCode, 200); assert.equal(res.body.success, true); // Client userId is ignored.
     res = await call(deleteOrder, { body: { market: 'TATA_INR', orderId: 'missing' } });
     assert.equal(res.statusCode, 404); assert.equal(res.body.code, 'ORDER_NOT_FOUND');
     assert.equal((await call(getDepth, { query: {} })).statusCode, 400);
     assert.equal((await call(getDepth, { query: { symbol: ['TATA_INR'] } })).statusCode, 400);
     assert.equal((await call(getDepth, { query: { symbol: 'NOPE_INR' } })).statusCode, 404);
-    assert.equal((await call(getOpenOrder, { query: { market: 'TATA_INR' } })).statusCode, 400);
+    assert.equal((await call(getOpenOrder, { query: { market: 'TATA_INR' } })).statusCode, 200);
     assert.equal((await call(createMarket, { body: { baseAsset: 'INR' } })).statusCode, 400);
     assert.equal((await call(createMarket, { body: { baseAsset: 'TEST' } })).statusCode, 201);
     assert.equal((await call(createMarket, { body: { baseAsset: 'TEST' } })).statusCode, 400);

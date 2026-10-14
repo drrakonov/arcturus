@@ -4,6 +4,10 @@ import { Engine } from '../engine/dist/trade/engine.js';
 import { parseDecimal, formatDecimal } from '../packages/contracts/dist/index.js';
 
 const market = 'TATA_INR';
+const cancel = (ctx, orderId) => {
+  const owner = ctx.engine.getSnapshot().orderbooks.flatMap(b => [...b.bids, ...b.asks]).find(o => o.orderId === orderId)?.userId ?? '1';
+  return ctx.engine.cancelOrder(market, orderId, owner);
+};
 function setup(options = {}) {
   let id = 0;
   const events = [], replies = [];
@@ -41,9 +45,9 @@ test('resting order reserves exact funds; full cancellation restores initial sta
     const order = ctx.place(side, '10.25', '2.1234');
     const b = balance(ctx.engine, side === 'buy' ? '1' : '2', side === 'buy' ? 'INR' : 'TATA');
     assert.equal(b.locked, side === 'buy' ? '21764850' : '2123400');
-    assert.deepEqual(ctx.engine.cancelOrder(market, order.orderId), { orderId: order.orderId, executedQty: 0, remainingQty: 2.1234 });
+    assert.deepEqual(cancel(ctx, order.orderId), { orderId: order.orderId, executedQty: 0, remainingQty: 2.1234 });
     assert.deepEqual(ctx.engine.getSnapshot().balances, before);
-    rejectsUnchanged(ctx, () => ctx.engine.cancelOrder(market, order.orderId), 'ORDER_NOT_FOUND');
+    rejectsUnchanged(ctx, () => cancel(ctx, order.orderId), 'ORDER_NOT_FOUND');
   }
 });
 test('buyer price improvement is refunded; partial remainder has exact reserve', () => {
@@ -53,7 +57,7 @@ test('buyer price improvement is refunded; partial remainder has exact reserve',
   assert.equal(buy.executedQty, 1);
   assert.equal(balance(ctx.engine, '1', 'INR').locked, '20000000');
   assert.equal(balance(ctx.engine, '1', 'INR').available, '9999971000000');
-  assert.deepEqual(ctx.engine.cancelOrder(market, buy.orderId), { orderId: buy.orderId, executedQty: 1, remainingQty: 2 });
+  assert.deepEqual(cancel(ctx, buy.orderId), { orderId: buy.orderId, executedQty: 1, remainingQty: 2 });
   assert.equal(balance(ctx.engine, '1', 'INR').locked, '0');
   assert.equal(balance(ctx.engine, '1', 'INR').available, '9999991000000');
   assert.deepEqual(totals(ctx.engine), before);
@@ -63,7 +67,7 @@ test('partial sell cancellation releases base and reports executed quantity', ()
   const ask = ctx.place('sell', '10', '3');
   ctx.place('buy', '10', '1');
   const quoteBefore = balance(ctx.engine, '2', 'INR');
-  const result = ctx.engine.cancelOrder(market, ask.orderId);
+  const result = cancel(ctx, ask.orderId);
   assert.equal(result.executedQty, 1);
   assert.equal(result.remainingQty, 2);
   assert.equal(balance(ctx.engine, '2', 'TATA').locked, '0');
@@ -143,10 +147,10 @@ test('depth is numerically sorted and consumed/cancelled levels publish zero tom
   ctx.place('sell', '10', '1'); ctx.place('sell', '9', '1');
   assert.deepEqual(ctx.command('GET_DEPTH', { market }).payload.asks, [['9', '1'], ['10', '1']]);
   ctx.place('buy', '10', '2');
-  assert.deepEqual(ctx.events.at(-1).data.a, [['9', '0'], ['10', '0']]);
+  assert.deepEqual(ctx.events.filter(e => e.data?.e === 'depth').at(-1).data.a, [['9', '0'], ['10', '0']]);
   const bid = ctx.place('buy', '8', '1');
-  ctx.engine.cancelOrder(market, bid.orderId);
-  assert.deepEqual(ctx.events.at(-1).data.b, [['8', '0']]);
+  cancel(ctx, bid.orderId);
+  assert.deepEqual(ctx.events.filter(e => e.data?.e === 'depth').at(-1).data.b, [['8', '0']]);
 });
 test('trade maker flags depend on resting side, not user identity', () => {
   for (const side of ['buy', 'sell']) {
@@ -162,7 +166,8 @@ test('versioned snapshots preserve integer state, FIFO, trade counters and fundi
   ctx.place('sell', '9.99', '0.3'); ctx.place('sell', '9.99', '0.4'); ctx.place('buy', '10', '0.1');
   const snapshot = JSON.parse(JSON.stringify(ctx.engine.getSnapshot()));
   const restored = setup({ snapshot });
-  assert.deepEqual(restored.engine.getSnapshot(), snapshot);
+  assert.notEqual(restored.engine.getSnapshot().generation, snapshot.generation);
+  assert.deepEqual({ ...restored.engine.getSnapshot(), generation: snapshot.generation }, snapshot);
   const expected = ctx.place('buy', '10', '0.3');
   const actual = restored.place('buy', '10', '0.3');
   assert.deepEqual(actual.fills, expected.fills);
@@ -181,7 +186,7 @@ test('seeded mixed-command run conserves each asset and exactly backs all open o
     ctx.place(side, `${9 + random(3)}.${String(random(100)).padStart(2, '0')}`, `0.${String(1 + random(9999)).padStart(4, '0')}`, user);
     if (i % 3 === 0) {
       const open = ctx.command('GET_OPEN_ORDERS', { market, userId: user }).payload;
-      if (open.length) ctx.engine.cancelOrder(market, open[random(open.length)].orderId);
+      if (open.length) cancel(ctx, open[random(open.length)].orderId);
     }
     assert.deepEqual(totals(ctx.engine), before);
     const snapshot = ctx.engine.getSnapshot();
@@ -208,7 +213,7 @@ test('full improved-price fill unlocks all quote; noncrossing limits remain rest
 test('insufficient base, invalid cancellation, and cap rejection leave state untouched', () => {
   const ctx = setup(); ctx.engine.onRamp('new', '1', 'f');
   rejectsUnchanged(ctx, () => ctx.place('sell', '1', '1', 'new'), 'INSUFFICIENT_FUNDS');
-  rejectsUnchanged(ctx, () => ctx.engine.cancelOrder(market, ''), 'INVALID_REQUEST');
+  rejectsUnchanged(ctx, () => cancel(ctx, ''), 'INVALID_REQUEST');
   ctx.engine.orderbooks[0].lastTradeId = Number.MAX_SAFE_INTEGER;
   rejectsUnchanged(ctx, () => ctx.place('buy', '1', '1'), 'LIMIT_EXCEEDED');
 });

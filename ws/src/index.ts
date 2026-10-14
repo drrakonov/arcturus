@@ -10,7 +10,7 @@ async function main() {
     // Connect Redis before the server accepts any connections
     await SubscriptionManager.connect();
 
-    const wss = new WebSocketServer({ port: PORT || 3001 });
+    const wss = new WebSocketServer({ port: PORT || 3001, maxPayload: 4096 });
     wss.on('connection', (ws) => {
         console.log("Connection request incoming...");
         UserManager.getInstance().addUser(ws);

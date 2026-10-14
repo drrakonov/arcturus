@@ -1,9 +1,9 @@
 # Arcturus ⚡
-> A simulated exchange backend with in-memory matching, Redis messaging and live market data.
+> A simulated exchange with a React trading screen, exact in-memory matching, Redis messaging and live market data.
 
-**Development status:** Milestone 1 trading-core correctness and local integration are verified.
-Frontend, account ownership and public deployment are pending. Current behavior,
-verification commands and limitations are described below.
+**Development status:** Milestone 2 adds the first functional trading screen, demo
+sessions, account ownership and request recovery. Public deployment remains pending.
+Verification commands and current limitations are described below.
 
 Arcturus is an exchange backend inspired by how platforms like Binance work internally. It implements a **price-time priority matching engine**, **real-time WebSocket market data**, **asynchronous persistence via TimescaleDB**, and a **self-sustaining market maker bot** — all connected through a Redis message bus.
 
@@ -19,6 +19,7 @@ Arcturus is an exchange backend inspired by how platforms like Binance work inte
 
 | Service | Port | Responsibility |
 |---|---|---|
+| `frontend` | 5173 | React + TypeScript trading screen (Vite development server) |
 | `api` | 3000 | REST gateway — accepts orders, serves depth/trades/klines |
 | `engine` | — | In-memory matching engine, single-threaded, price-time priority |
 | `ws` | 3001 | WebSocket server — real-time market data via Redis Pub/Sub |
@@ -30,6 +31,7 @@ Arcturus is an exchange backend inspired by how platforms like Binance work inte
 ## ⚙️ Tech Stack
 
 - **Runtime:** Node.js + TypeScript
+- **Frontend:** React + TypeScript + Vite
 - **API:** Express.js
 - **Message Bus:** Redis (List queue + Pub/Sub)
 - **Database:** TimescaleDB (PostgreSQL + time-series hypertables)
@@ -142,7 +144,7 @@ npm run typecheck
 npm test
 ```
 Each service retains its own lockfile. `bootstrap` runs `npm ci` in the contracts
-package and every service; `build` builds contracts before their consumers.
+package, every service and the frontend; `build` builds contracts before their consumers.
 No global TypeScript installation is needed.
 
 ### Configure
@@ -163,6 +165,20 @@ start command starts the engine, API and WebSocket server on the host, and stops
 other host processes if one exits. It does not start a duplicate database processor.
 Database and Redis host ports bind to loopback only.
 
+In a separate terminal, start the trading screen:
+```bash
+npm run dev:frontend
+```
+Open http://localhost:5173. Each fresh tab opened via **Open second trader** receives
+an independent demo account with 100,000 INR and 100 TATA. Place a sell limit at 9 for
+3 TATA in one tab, buy 1 TATA at 10 in the other, then cancel the seller's remainder.
+The trade executes at 9; balances, recent trades and the book update live.
+The book starts empty until real orders are submitted.
+
+Frontend overrides are `VITE_API_URL` and `VITE_WS_URL` (see `frontend/.env.example`).
+Set API `CORS_ORIGIN` to the frontend origin if changing host/port. Vite variables
+are embedded at build time. `npm run build` creates the static frontend in `frontend/dist`.
+
 In a separate terminal, optionally start the simulator:
 ```bash
 npm run start:market-maker
@@ -178,13 +194,13 @@ For a **fresh, disposable engine and database only**:
 ```bash
 SMOKE_DISPOSABLE=1 npm run smoke
 ```
-The smoke check places real simulated orders for seeded accounts 1 and 2 and checks
+The smoke check provisions two demo sessions, places real simulated orders and checks
 HTTP responses, Redis-mediated matching, persisted trade history and WebSocket events.
 That baseline check does not certify balance correctness, candle refresh, durability or cloud readiness.
 It intentionally refuses to run without the disposable opt-in. Never run it against
 an active/shared demo.
 
-`npm test` builds all packages and runs 21 tests, including exact settlement,
+`npm test` builds all packages and runs the unit tests, including exact settlement,
 price-time priority, refunds, cancellation, validation, snapshots and a seeded
 500-command conservation check. API controller tests substitute the Redis transport.
 
@@ -200,13 +216,24 @@ SMOKE_DISPOSABLE=1 npm run test:integration
 ```
 
 The runner starts host API/engine/WS/worker processes and checks fractional settlement,
-refunds, cancellation, error responses, persistence and WebSocket delivery. It requires
+refunds, cancellation, error responses, persistence, session isolation, concurrent
+request deduplication, API deadlines and private WebSocket delivery. It requires
 unused Redis DB 15 on localhost:16379 and PostgreSQL on localhost:15432 with the local
-development credentials. It creates and removes its own database and queue keys, stops
+development credentials. It creates and removes its own database, session and queue keys, stops
 its host processes and leaves logs/snapshots in a temporary directory. Run it exclusively:
 Redis Pub/Sub channels are shared across logical databases. No Docker commands are run
 by the test script. Port overrides: `TEST_POSTGRES_PORT`, `TEST_REDIS_PORT`,
 `TEST_API_PORT`, `TEST_WS_PORT`.
+
+To also test two real browser traders, reconnect/resync and loss of an order response:
+```bash
+npm --prefix frontend exec -- playwright install chromium
+SMOKE_DISPOSABLE=1 npm run test:browser
+```
+This uses the same isolated stack plus a frontend on port 15173. Chromium tests perform
+actual trades and retain desktop/mobile screenshots in the printed temporary directory.
+No executions or market data are mocked; one response is deliberately dropped after
+execution to verify that retrying the same request does not duplicate the order.
 
 Stop the disposable containers afterward:
 
@@ -225,18 +252,28 @@ The disposable PostgreSQL data uses temporary memory storage and is discarded on
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/` | Health check |
-| `POST` | `/api/v1/order` | Place a new order |
+| `POST` | `/api/v1/session` | Create or resume an eight-hour demo session |
+| `GET` | `/api/v1/account` | Authoritative own balances and open orders (session required) |
+| `GET` | `/api/v1/market` | Current depth and latest 50 engine executions |
+| `POST` | `/api/v1/order` | Place an order for the authenticated account |
 | `DELETE` | `/api/v1/order` | Cancel an order |
-| `GET` | `/api/v1/order/open` | Get open orders for a user |
+| `GET` | `/api/v1/order/open` | Get own open orders (session required) |
 | `GET` | `/api/v1/depth` | Get order book depth |
 | `GET` | `/api/v1/trades` | Recent trade history |
 | `GET` | `/api/v1/klines` | OHLCV candlestick data (1m) |
 | `GET` | `/api/v1/tickers` | 24h ticker statistics |
-| `POST` | `/api/v1/markets` | Create a market after engine validation and acknowledgement |
+| `POST` | `/api/v1/markets` | Disabled publicly; market provisioning is internal |
 
 Market-data reads require `?symbol=TATA_INR`; open orders require
-`?userId=1&market=TATA_INR`. Klines support only `interval=1m`.
-There is no market-list GET route, account/balance route, market-order type or frontend yet.
+`?market=TATA_INR`. Klines support only `interval=1m`. There is no market-order type.
+Private routes require `Authorization: Bearer <session-token>`; user IDs in request
+bodies or queries cannot select another account. Foreign cancellation returns 404.
+Create/cancel requests also require `Idempotency-Key` (8–64 letters, digits or hyphens).
+The engine caches results per account/key for ten minutes, up to 10,000 entries,
+rejecting new requests when full rather than evicting unexpired results. Reusing a key
+with different fields returns 409. The UI retains uncertain requests and retries the
+same key for up to nine minutes; check balances/orders before clearing an unresolved
+request. API engine calls time out after five seconds; expired queued commands do not execute.
 
 ### Trading rules
 
@@ -255,9 +292,13 @@ There is no market-list GET route, account/balance route, market-order type or f
 
 ### Example — Place a Buy Order
 ```bash
+# Create a session; copy payload.token into DEMO_TOKEN locally.
+curl -X POST http://localhost:3000/api/v1/session
 curl -X POST http://localhost:3000/api/v1/order \
   -H "Content-Type: application/json" \
-  -d '{"market":"TATA_INR","price":"999","quantity":"1","side":"buy","userId":"1"}'
+  -H "Authorization: Bearer $DEMO_TOKEN" \
+  -H "Idempotency-Key: manual-buy-0001" \
+  -d '{"market":"TATA_INR","price":"999","quantity":"1","side":"buy"}'
 ```
 
 ### Example — Subscribe to Live Feed (WebSocket)
@@ -265,7 +306,11 @@ curl -X POST http://localhost:3000/api/v1/order \
 # Connect
 wscat -c ws://localhost:3001
 
-# Subscribe (send this message after connecting)
+# Authenticate for your own account notifications; wait for READY.
+{"method":"AUTH","token":"<session-token>"}
+# Subscribe; wait for SUBSCRIBED before fetching REST snapshots.
+{"method":"SUBSCRIBE","params":["market@TATA_INR"]}
+# Legacy public streams are also available:
 {"method":"SUBSCRIBE","params":["depth@TATA_INR","trade@TATA_INR","ticker@TATA_INR"]}
 ```
 
@@ -279,11 +324,22 @@ wscat -c ws://localhost:3001
 - Redis lists carry commands and persistence events; Pub/Sub carries replies and live data.
 - Database writes are asynchronous and currently lack reliable retry handling.
 - Matching, settlement and cancellation use exact integer units and checked in-memory transactions.
-- Account ownership, request timeouts and reliable event delivery remain pending.
+- Sessions are bearer tokens in per-tab sessionStorage with an eight-hour Redis TTL.
+  This is guest access for virtual trading, not a production identity system.
+- Full market/account snapshots carry generation/revision; the UI resynchronizes on
+  reconnect and every 15 seconds to recover missed Pub/Sub notifications.
+- Recent executions are bounded to 50 per market. Charts/history enhancements are later work.
+- Deduplication survives a valid snapshot restore, but is not a crash-proof execution ledger.
+  Losing engine state or restoring an older snapshot can lose recent requests/trades.
+- Reliable event delivery remains pending. Session expiry does not cancel resting orders;
+  accounts remain in memory until a deliberate demo reset (1,000-account cap).
+- The market maker now uses its own demo session and serial ticks; its random walk still
+  sends real orders to the engine. It has finite virtual funds and no automatic refill.
 - Maker database updates are additive; cancellations are not yet recorded as cancelled in SQL.
 - There is no coordinated engine/database restore: avoid mixing a fresh engine with old
   history in a shared demo. Legacy snapshots are incompatible with version 2.
-- The default market is TATA_INR with seeded simulated users 1, 2 and 5.
+- The default market is TATA_INR. Legacy seeded users 1, 2 and 5 are internal only;
+  browser sessions always receive new server-generated account IDs.
 
 The approved roadmap preserves this architecture and adds correctness, a trading frontend,
 execution inspection, controlled scenarios and reproducible benchmarks incrementally.

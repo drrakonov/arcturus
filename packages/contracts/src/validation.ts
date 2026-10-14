@@ -1,7 +1,7 @@
 import type { MessageFromApi } from './index.js';
 
 export type ErrorCode = 'INVALID_REQUEST' | 'UNKNOWN_MARKET' | 'UNKNOWN_USER' |
-    'INSUFFICIENT_FUNDS' | 'ORDER_NOT_FOUND' | 'LIMIT_EXCEEDED' | 'DUPLICATE_TRANSACTION' | 'INTERNAL_ERROR';
+    'INSUFFICIENT_FUNDS' | 'ORDER_NOT_FOUND' | 'LIMIT_EXCEEDED' | 'DUPLICATE_TRANSACTION' | 'INTERNAL_ERROR' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'REQUEST_CONFLICT' | 'REQUEST_TIMEOUT' | 'SERVICE_UNAVAILABLE';
 export class TradingError extends Error {
     constructor(public code: ErrorCode, message: string) { super(message); }
 }
@@ -37,7 +37,7 @@ export function validateMessage(value: unknown): MessageFromApi {
     if (!value || typeof value !== 'object') throw new TradingError('INVALID_REQUEST', 'Expected a command');
     const { type, data } = value as { type?: unknown; data?: any };
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new TradingError('INVALID_REQUEST', 'Expected command data');
-    if (['CREATE_ORDER', 'CANCEL_ORDER', 'GET_DEPTH', 'GET_OPEN_ORDERS'].includes(String(type))) {
+    if (['CREATE_ORDER', 'CANCEL_ORDER', 'GET_DEPTH', 'GET_OPEN_ORDERS', 'GET_MARKET'].includes(String(type))) {
         if (typeof data.market !== 'string' || !/^[A-Z][A-Z0-9]{0,11}_INR$/.test(data.market))
             throw new TradingError('INVALID_REQUEST', 'Invalid market');
     }
@@ -48,9 +48,10 @@ export function validateMessage(value: unknown): MessageFromApi {
             parseDecimal(data.price, PRICE_DECIMALS);
             parseDecimal(data.quantity, QUANTITY_DECIMALS);
             break;
-        case 'CANCEL_ORDER': identifier(data.orderId, 'orderId'); break;
+        case 'CANCEL_ORDER': identifier(data.orderId, 'orderId'); identifier(data.userId, 'userId'); break;
         case 'GET_OPEN_ORDERS': identifier(data.userId, 'userId'); break;
-        case 'GET_DEPTH': break;
+        case 'GET_DEPTH': case 'GET_MARKET': break;
+        case 'CREATE_ACCOUNT': case 'GET_ACCOUNT': identifier(data.userId, 'userId'); break;
         case 'ON_RAMP':
             identifier(data.userId, 'userId'); identifier(data.txnId, 'txnId');
             parseDecimal(data.amount, BALANCE_DECIMALS); break;
