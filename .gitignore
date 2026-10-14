@@ -20,3 +20,10 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Local environment variants (keep documented examples)
+.env.*
+!.env.example
+
+# Private local development tracking
+/PROGRESS.md

@@ -1,0 +1,24 @@
+# Overlay for disposable Milestone 0 checks. Requires Compose >= 2.24.4.
+# Use with project arcturus-m0 and docker-compose.yml; never start the market maker.
+services:
+  timescaledb:
+    container_name: !reset null
+    restart: "no"
+    ports: !override
+      - "127.0.0.1:15432:5432"
+    volumes: !override
+      - type: tmpfs
+        target: /var/lib/postgresql/data
+
+  redis:
+    container_name: !reset null
+    restart: "no"
+    ports: !override
+      - "127.0.0.1:16379:6379"
+
+  db-processor:
+    container_name: !reset null
+    restart: "no"
+    # Reuse the image already built by the user from the main Compose file.
+    image: ${SMOKE_WORKER_IMAGE:-docker-db-processor:latest}
+    pull_policy: never

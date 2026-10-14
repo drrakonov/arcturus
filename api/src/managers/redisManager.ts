@@ -10,8 +10,8 @@ export class RedisManager {
     private static instance: RedisManager;
 
     private constructor() {
-        this.client = createClient();
-        this.publisher = createClient();
+        this.client = createClient({ url: process.env.REDIS_URL || "redis://localhost:6379" });
+        this.publisher = createClient({ url: process.env.REDIS_URL || "redis://localhost:6379" });
     }
 
     // Call once at startup with await before the server starts accepting requests.

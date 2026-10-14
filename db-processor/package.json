@@ -7,16 +7,22 @@
   "scripts": {
     "build": "tsc -b",
     "start": "node dist/index.js",
-    "dev": "npm run build && npm run start"
+    "dev": "npm run build && npm run start",
+    "typecheck": "tsc --noEmit --incremental false"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
     "pg": "^8.16.0",
     "redis": "^5.8.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@arcturus/contracts": "file:../packages/contracts"
   },
   "devDependencies": {
     "@types/node": "^24.7.0",
     "@types/pg": "^8.11.14"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22.12.0 <25"
   }
 }
