@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Engine } from '../engine/dist/trade/engine.js';
-const market = 'TATA_INR';
+const market = 'SOL_INR';
 const call = (engine, type, data, extra = {}) => engine.process({ clientId: 'test', message: { type, data }, ...extra });
 const account = (engine, userId) => call(engine, 'GET_ACCOUNT', { userId }).payload;
 
@@ -10,7 +10,7 @@ test('demo provisioning is idempotent, exact and isolated', () => {
   for (const userId of ['alice', 'bob']) {
     const a = call(engine, 'CREATE_ACCOUNT', { userId });
     assert.equal(a.type, 'ACCOUNT');
-    assert.deepEqual(a.payload.balances, { INR: { available: '100000', locked: '0' }, TATA: { available: '100', locked: '0' } });
+    assert.deepEqual(a.payload.balances, { INR: { available: '100000', locked: '0' }, SOL: { available: '100', locked: '0' } });
   }
   const order = call(engine, 'CREATE_ORDER', { market, side: 'buy', price: '9', quantity: '2', userId: 'alice' });
   assert.equal(account(engine, 'bob').openOrders.length, 0);
@@ -34,7 +34,7 @@ test('private updates contain only the matching accounts; market stream has no a
   const updates = events.filter(e => e.channel.startsWith('account@'));
   assert.deepEqual(updates.map(e => e.data.data.snapshot.userId).sort(), ['alice', 'bob']);
   assert.equal(account(engine, 'bob').balances.INR.available, '99991');
-  assert.equal(account(engine, 'bob').balances.TATA.available, '101');
+  assert.equal(account(engine, 'bob').balances.SOL.available, '101');
   const publicMarket = events.find(e => e.channel.startsWith('market@')).data.data.snapshot;
   assert.equal(publicMarket.trades.length, 1);
   assert.equal(JSON.stringify(publicMarket).includes('alice'), false);
@@ -67,4 +67,11 @@ test('expired queued commands do not execute and request cache is bounded with e
   now = 1002;
   assert.equal(call(engine, 'CREATE_ORDER', data, { requestId: 'new-request' }).type, 'ORDER_PLACED');
   assert.equal(engine.requests.size, 1);
+});
+
+test('legacy stock snapshots are rejected rather than relabeled as SOL executions', () => {
+  const snapshot = new Engine().getSnapshot();
+  snapshot.orderbooks[0].baseAsset = 'TATA';
+  assert.throws(() => new Engine({ snapshot }), /Legacy TATA snapshot/);
+  assert.equal(snapshot.orderbooks[0].baseAsset, 'TATA');
 });

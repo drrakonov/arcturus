@@ -26,9 +26,13 @@ export interface AccountSnapshot {
     openOrders: (Order & { market: string })[];
 }
 export interface RecentTrade { id: string; price: string; quantity: string; isBuyerMaker: boolean; timestamp: number }
+export type CandleInterval = '5s' | '1m';
+export interface Candle { time: number; open: string; high: string; low: string; close: string; volume: string }
 export interface MarketSnapshot {
     market: string; generation: string; revision: number;
     bids: [string, string][]; asks: [string, string][]; trades: RecentTrade[];
+    candles: Record<CandleInterval, Candle[]>;
+    candleHistory: boolean;
 }
 export type MessageFromApi = {
     type: 'CREATE_ACCOUNT' | 'GET_ACCOUNT', data: { userId: string }

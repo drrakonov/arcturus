@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { mergeMarket } from './market';
 import { ApiError, newer, request, wsUrl } from './client';
 import type { AccountSnapshot, MarketSnapshot, PendingAction, Session } from './client';
 
@@ -44,10 +45,10 @@ export function useTerminal() {
         try {
           const [a, m] = await Promise.all([
             request<AccountSnapshot>('/api/v1/account', session.token),
-            request<MarketSnapshot>('/api/v1/market?symbol=TATA_INR', session.token),
+            request<MarketSnapshot>('/api/v1/market?symbol=SOL_INR', session.token),
           ]);
           if (stopped || socket.current !== ws || ws.readyState !== WebSocket.OPEN) return;
-          setAccount(old => newer(old, a)); setMarket(old => newer(old, m)); setStatus('live'); failures = 0;
+          setAccount(old => newer(old, a)); setMarket(old => mergeMarket(old, m)); setStatus('live'); failures = 0;
         } catch (err) {
           if (stopped || socket.current !== ws) return;
           const e = err as ApiError;
@@ -68,13 +69,13 @@ export function useTerminal() {
         lastReceived = Date.now();
         let message;
         try { message = JSON.parse(event.data); } catch { return; }
-        if (message.type === 'READY') ws.send(JSON.stringify({ method: 'SUBSCRIBE', params: ['market@TATA_INR'] }));
+        if (message.type === 'READY') ws.send(JSON.stringify({ method: 'SUBSCRIBE', params: ['market@SOL_INR'] }));
         if (message.type === 'SUBSCRIBED') {
           clearTimeout(handshake);
           void sync();
           refresh = setInterval(() => void sync(), 15_000);
         }
-        if (message.data?.e === 'market') setMarket(old => newer(old, message.data.snapshot));
+        if (message.data?.e === 'market') setMarket(old => mergeMarket(old, message.data.snapshot));
         if (message.data?.e === 'account' && message.data.snapshot.userId === session.userId) {
           setAccount(old => newer(old, message.data.snapshot)); setNotice('Account updated · balances and open orders synchronized');
         }
@@ -102,7 +103,7 @@ export function useTerminal() {
     try {
       const result = await request<{ executedQty: number; orderId: string }>(action.path, session.token, action);
       setNotice(action.method === 'DELETE' ? 'Order cancelled · remaining funds released' :
-        result.executedQty > 0 ? `Order accepted · ${result.executedQty} TATA filled` : 'Limit order placed · waiting for a matching order');
+        result.executedQty > 0 ? `Order accepted · ${result.executedQty} SOL filled` : 'Limit order placed · waiting for a matching order');
       setPending(null); sessionStorage.removeItem('arcturus-pending');
       try {
         const a = await request<AccountSnapshot>('/api/v1/account', session.token);

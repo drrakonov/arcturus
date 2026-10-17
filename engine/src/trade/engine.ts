@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { TradingError, validateMessage, parseDecimal, formatDecimal } from '@arcturus/contracts';
-import type { DbMessage, MessageToApi, WsMessage, AccountSnapshot, MarketSnapshot, RecentTrade } from '@arcturus/contracts';
+import type { DbMessage, MessageToApi, WsMessage, AccountSnapshot, MarketSnapshot, RecentTrade, Candle, CandleInterval } from '@arcturus/contracts';
 import { Orderbook, toWireOrder, type BookOrder, type Fill } from './orderbook.js';
+
+import { addFill } from './candles.js';
 
 export const BASE_CURRENCY = 'INR';
 type Balance = { available: bigint; locked: bigint };
@@ -30,6 +32,7 @@ export class Engine {
     private generation = randomUUID();
     private revision = 0;
     private recentTrades = new Map<string, RecentTrade[]>();
+    private candles = new Map<string, Record<CandleInterval, Candle[]>>();
     private requests = new Map<string, { fingerprint: string; expires: number; response: MessageToApi }>();
     private usedTxnIds = new Set<string>();
     private sink: EngineSink;
@@ -41,10 +44,10 @@ export class Engine {
         this.now = options.now ?? Date.now;
         if (options.snapshot !== undefined) this.restore(options.snapshot);
         else {
-            this.orderbooks = [new Orderbook('TATA')];
+            this.orderbooks = [new Orderbook('SOL')];
             for (const id of ['1', '2', '5']) this.balances.set(id, {
                 INR: { available: 10_000_000_000_000n, locked: 0n },
-                TATA: { available: 10_000_000_000_000n, locked: 0n },
+                SOL: { available: 10_000_000_000_000n, locked: 0n },
             });
         }
         this.assertState(this.orderbooks, this.balances);
@@ -149,8 +152,14 @@ export class Engine {
         this.emit(() => this.publishDepth(original, book));
         this.revision++;
         const recent = this.recentTrades.get(market) ?? [];
-        for (const fill of fills) recent.unshift({ id: String(fill.tradeId), price: formatDecimal(fill.price, 2),
-            quantity: formatDecimal(fill.qty, 4), isBuyerMaker: side === 'sell', timestamp: this.now() });
+        const candles = this.candles.get(market) ?? { '5s': [], '1m': [] };
+        for (const fill of fills) {
+            const timestamp = this.now();
+            recent.unshift({ id: String(fill.tradeId), price: formatDecimal(fill.price, 2),
+                quantity: formatDecimal(fill.qty, 4), isBuyerMaker: side === 'sell', timestamp });
+            for (const interval of ['5s', '1m'] as const) addFill(candles[interval], fill.price, fill.qty, timestamp, interval);
+        }
+        this.candles.set(market, candles);
         this.recentTrades.set(market, recent.slice(0, 50));
         this.notify(market, [userId, ...fills.map(f => f.otherUserId)]);
         return { orderId: order.orderId, executedQty: numberQty(executedQty),
@@ -179,7 +188,7 @@ export class Engine {
     private createAccount(userId: string) {
         if (this.balances.has(userId)) return;
         if (this.balances.size >= 1000) throw new TradingError('LIMIT_EXCEEDED', 'Demo account capacity reached');
-        this.balances.set(userId, { INR: { available: 100_000_000_000n, locked: 0n }, TATA: { available: 100_000_000n, locked: 0n } });
+        this.balances.set(userId, { INR: { available: 100_000_000_000n, locked: 0n }, SOL: { available: 100_000_000n, locked: 0n } });
         this.revision++;
     }
     getAccount(userId: string): AccountSnapshot {
@@ -191,13 +200,15 @@ export class Engine {
             openOrders: this.orderbooks.flatMap(book => [...book.bids, ...book.asks]
                 .filter(o => o.userId === userId).map(o => ({ ...toWireOrder(o), market: book.ticker() }))) };
     }
-    getMarket(market: string): MarketSnapshot {
+    getMarket(market: string, history = true): MarketSnapshot {
         const depth = this.book(market).getDepth();
         return { market, generation: this.generation, revision: this.revision,
-            bids: depth.bids.slice(0, 20), asks: depth.asks.slice(0, 20), trades: structuredClone(this.recentTrades.get(market) ?? []) };
+            bids: depth.bids.slice(0, 20), asks: depth.asks.slice(0, 20), trades: structuredClone(this.recentTrades.get(market) ?? []),
+            candleHistory: history, candles: Object.fromEntries((['5s', '1m'] as const).map(interval =>
+                [interval, structuredClone(history ? this.candles.get(market)?.[interval] ?? [] : this.candles.get(market)?.[interval].slice(-1) ?? [])])) as Record<CandleInterval, Candle[]> };
     }
     private notify(market: string, users: string[]) {
-        this.emit(() => this.sink.publishMessage(`market@${market}`, { stream: `market@${market}`, data: { e: 'market', snapshot: this.getMarket(market) } }));
+        this.emit(() => this.sink.publishMessage(`market@${market}`, { stream: `market@${market}`, data: { e: 'market', snapshot: this.getMarket(market, false) } }));
         for (const userId of new Set(users)) this.emit(() => this.sink.publishMessage(`account@${userId}`,
             { stream: `account@${userId}`, data: { e: 'account', snapshot: this.getAccount(userId) } }));
     }
@@ -300,7 +311,7 @@ export class Engine {
     }
     getSnapshot() {
         return { version: 2, generation: this.generation, revision: this.revision, requests: [...this.requests],
-            recentTrades: [...this.recentTrades], orderbooks: this.orderbooks.map(b => ({ baseAsset: b.baseAsset,
+            candles: [...this.candles], recentTrades: [...this.recentTrades], orderbooks: this.orderbooks.map(b => ({ baseAsset: b.baseAsset,
             bids: b.bids.map(o => ({ ...o, price: String(o.price), quantity: String(o.quantity), filled: String(o.filled) })),
             asks: b.asks.map(o => ({ ...o, price: String(o.price), quantity: String(o.quantity), filled: String(o.filled) })),
             lastTradeId: b.lastTradeId, currentPrice: String(b.currentPrice) })),
@@ -310,10 +321,14 @@ export class Engine {
     }
     private restore(snapshot: any) {
         if (snapshot?.version !== 2) throw new Error('Incompatible snapshot: Milestone 1 requires version 2; start a fresh isolated demo');
+        if (snapshot.orderbooks?.some((book: any) => book.baseAsset === 'TATA')) {
+            throw new Error('Legacy TATA snapshot: preserve it and start a fresh SOL demo with WITH_SNAPSHOT empty; assets and executions are not converted');
+        }
         // Each process boot has a new generation, including rollback to an older snapshot.
         this.revision = snapshot.revision ?? 0;
         this.requests = new Map(snapshot.requests ?? []);
         this.recentTrades = new Map(snapshot.recentTrades ?? []);
+        this.candles = new Map(snapshot.candles ?? []);
         const units = (value: unknown) => {
             if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(value)) throw new Error('Invalid snapshot units');
             return BigInt(value);
@@ -324,7 +339,7 @@ export class Engine {
             return new Orderbook(b.baseAsset, orders(b.bids), orders(b.asks), b.lastTradeId, units(b.currentPrice));
         });
         this.balances = new Map(snapshot.balances.map(([id, assets]: [string, Record<string, any>]) => {
-            validateMessage({ type: 'GET_OPEN_ORDERS', data: { userId: id, market: 'TATA_INR' } });
+            validateMessage({ type: 'GET_OPEN_ORDERS', data: { userId: id, market: 'SOL_INR' } });
             return [id, Object.fromEntries(Object.entries(assets).map(([symbol, b]) => {
                 if (!/^[A-Z][A-Z0-9]{0,11}$/.test(symbol)) throw new Error('Invalid snapshot asset');
                 return [symbol, { available: units(b.available), locked: units(b.locked) }];

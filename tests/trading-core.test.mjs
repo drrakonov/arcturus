@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Engine } from '../engine/dist/trade/engine.js';
 import { parseDecimal, formatDecimal } from '../packages/contracts/dist/index.js';
 
-const market = 'TATA_INR';
+const market = 'SOL_INR';
 const cancel = (ctx, orderId) => {
   const owner = ctx.engine.getSnapshot().orderbooks.flatMap(b => [...b.bids, ...b.asks]).find(o => o.orderId === orderId)?.userId ?? '1';
   return ctx.engine.cancelOrder(market, orderId, owner);
@@ -43,7 +43,7 @@ test('resting order reserves exact funds; full cancellation restores initial sta
   for (const side of ['buy', 'sell']) {
     const ctx = setup(), before = ctx.engine.getSnapshot().balances;
     const order = ctx.place(side, '10.25', '2.1234');
-    const b = balance(ctx.engine, side === 'buy' ? '1' : '2', side === 'buy' ? 'INR' : 'TATA');
+    const b = balance(ctx.engine, side === 'buy' ? '1' : '2', side === 'buy' ? 'INR' : 'SOL');
     assert.equal(b.locked, side === 'buy' ? '21764850' : '2123400');
     assert.deepEqual(cancel(ctx, order.orderId), { orderId: order.orderId, executedQty: 0, remainingQty: 2.1234 });
     assert.deepEqual(ctx.engine.getSnapshot().balances, before);
@@ -70,8 +70,8 @@ test('partial sell cancellation releases base and reports executed quantity', ()
   const result = cancel(ctx, ask.orderId);
   assert.equal(result.executedQty, 1);
   assert.equal(result.remainingQty, 2);
-  assert.equal(balance(ctx.engine, '2', 'TATA').locked, '0');
-  assert.equal(balance(ctx.engine, '2', 'TATA').available, '9999999000000');
+  assert.equal(balance(ctx.engine, '2', 'SOL').locked, '0');
+  assert.equal(balance(ctx.engine, '2', 'SOL').available, '9999999000000');
   assert.deepEqual(balance(ctx.engine, '2', 'INR'), quoteBefore);
 });
 test('best-price then FIFO matching, maker-price execution and partial maker priority on both sides', () => {
@@ -94,7 +94,7 @@ test('fractional fills and minimum tick/lot settle exactly without dust', () => 
   for (let i = 0; i < 3; i++) ctx.place('buy', '0.02', '0.0001');
   assert.equal(balance(ctx.engine, '1', 'INR').available, '9999999999997');
   assert.equal(balance(ctx.engine, '1', 'INR').locked, '0');
-  assert.equal(balance(ctx.engine, '2', 'TATA').locked, '0');
+  assert.equal(balance(ctx.engine, '2', 'SOL').locked, '0');
   assert.deepEqual(totals(ctx.engine), before);
   assert.deepEqual(ctx.command('GET_DEPTH', { market }).payload, { bids: [], asks: [] });
   assert.deepEqual(ctx.events.filter(e => e.type === 'TRADE_ADDED').map(e => e.data.quoteQuantity), ['0.000001', '0.000001', '0.000001']);
@@ -138,7 +138,7 @@ test('newly funded buyer receives a previously absent asset; funding validates b
   ctx.engine.onRamp('new', '100', 'txn');
   rejectsUnchanged(ctx, () => ctx.engine.onRamp('new', '100', 'txn'), 'DUPLICATE_TRANSACTION');
   ctx.place('sell', '10', '1'); ctx.place('buy', '11', '1', 'new');
-  assert.equal(balance(ctx.engine, 'new', 'TATA').available, '1000000');
+  assert.equal(balance(ctx.engine, 'new', 'SOL').available, '1000000');
   assert.equal(balance(ctx.engine, 'new', 'INR').available, '90000000');
   assert.equal(balance(ctx.engine, 'new', 'INR').locked, '0');
 });
@@ -196,7 +196,7 @@ test('seeded mixed-command run conserves each asset and exactly backs all open o
         for (const o of book.bids.filter(o => o.userId === id)) quote += BigInt(o.price) * (BigInt(o.quantity) - BigInt(o.filled));
         for (const o of book.asks.filter(o => o.userId === id)) base += (BigInt(o.quantity) - BigInt(o.filled)) * 100n;
       }
-      assert.equal(BigInt(assets.INR.locked), quote); assert.equal(BigInt(assets.TATA.locked), base);
+      assert.equal(BigInt(assets.INR.locked), quote); assert.equal(BigInt(assets.SOL.locked), base);
       for (const b of Object.values(assets)) assert.ok(BigInt(b.available) >= 0n && BigInt(b.locked) >= 0n);
     }
   }
@@ -222,7 +222,7 @@ test('repeated 0.1 fills fully remove a 0.3 maker without floating-point residue
   for (let i = 0; i < 3; i++) ctx.place('buy', '0.2', '0.1');
   assert.deepEqual(ctx.command('GET_DEPTH', { market }).payload, { bids: [], asks: [] });
   assert.equal(balance(ctx.engine, '1', 'INR').locked, '0');
-  assert.equal(balance(ctx.engine, '2', 'TATA').locked, '0');
+  assert.equal(balance(ctx.engine, '2', 'SOL').locked, '0');
 });
 test('event transport exception never reports a committed trade as rejected', () => {
   const original = console.error; const errors = [];

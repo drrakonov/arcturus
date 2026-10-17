@@ -22,6 +22,7 @@ const pgConfig = { host: '127.0.0.1', port: Number(process.env.TEST_POSTGRES_POR
 const redisUrl = `redis://127.0.0.1:${Number(process.env.TEST_REDIS_PORT ?? 16379)}/15`;
 const env = { ...process.env, REDIS_URL: redisUrl, POSTGRES_HOST: pgConfig.host,
   POSTGRES_PORT: String(pgConfig.port), POSTGRES_USER: pgConfig.user, POSTGRES_PASSWORD: pgConfig.password,
+  API_BASE_URL: `http://127.0.0.1:${Number(process.env.TEST_API_PORT ?? 13000)}`, TOTAL_BIDS: '4', TOTAL_ASKS: '4', INTERVAL_MS: '250',
   POSTGRES_DB: db, WITH_SNAPSHOT: '', CORS_ORIGIN: 'http://127.0.0.1:15173', REQUEST_TIMEOUT_MS: '1200' };
 const apiPort = Number(process.env.TEST_API_PORT ?? 13000), wsPort = Number(process.env.TEST_WS_PORT ?? 13001);
 const children = [], events = [];
@@ -37,6 +38,7 @@ function launch(service, port) {
   children.push(child);
   child.on('error', error => { logs += `${service}: ${error.message}\n`; });
   for (const stream of [child.stdout, child.stderr]) stream.on('data', data => { logs += `[${service}] ${data}`; });
+  return child;
 }
 async function until(check, label) {
   for (let i = 0; i < 100; i++) {
@@ -78,14 +80,14 @@ try {
   socket = new WebSocket(`ws://127.0.0.1:${wsPort}`);
   socket.on('message', raw => events.push(JSON.parse(raw.toString())));
   await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
-  socket.send(JSON.stringify({ method: 'SUBSCRIBE', params: ['depth@TATA_INR', 'trade@TATA_INR'] }));
+  socket.send(JSON.stringify({ method: 'SUBSCRIBE', params: ['depth@SOL_INR', 'trade@SOL_INR'] }));
   await until(() => events.some(e => e.type === 'SUBSCRIBED'), 'public subscription acknowledgement');
   const seller = await session(), buyer = await session();
   assert.notEqual(seller.userId, buyer.userId);
   await request('/api/v1/account', undefined, 401);
   await request('/api/v1/order', {}, 401);
   const initial = (await request('/api/v1/account', undefined, 200, 'GET', buyer.token)).payload;
-  assert.deepEqual(initial.balances, { INR: { available: '100000', locked: '0' }, TATA: { available: '100', locked: '0' } });
+  assert.deepEqual(initial.balances, { INR: { available: '100000', locked: '0' }, SOL: { available: '100', locked: '0' } });
   assert.equal((await request('/api/v1/session', {}, 200, 'POST', buyer.token)).payload.userId, buyer.userId);
   const privateEvents = [];
   privateSocket = new WebSocket(`ws://127.0.0.1:${wsPort}`);
@@ -95,7 +97,7 @@ try {
   await until(() => privateEvents.some(e => e.type === 'READY'), 'private subscription');
   privateSocket.send(JSON.stringify({ method: 'SUBSCRIBE', params: [`account@${seller.userId}`] }));
   await until(() => privateEvents.some(e => e.type === 'ERROR'), 'foreign private stream rejection');
-  const order = { market: 'TATA_INR', price: '0.01', quantity: '0.0003', side: 'sell', userId: '2' };
+  const order = { market: 'SOL_INR', price: '0.01', quantity: '0.0003', side: 'sell', userId: '2' };
   const invalid = await request('/api/v1/order', { ...order, price: 'NaN' }, 400, 'POST', seller.token);
   assert.equal(invalid.code, 'INVALID_REQUEST');
   const poor = await request('/api/v1/order', { ...order, side: 'buy', price: '1000000', quantity: '1000000' }, 422, 'POST', buyer.token);
@@ -107,18 +109,18 @@ try {
   ]);
   assert.deepEqual(sell, duplicate);
   await request('/api/v1/order', { ...order, quantity: '1' }, 409, 'POST', seller.token, key);
-  assert.equal((await request(`/api/v1/order/open?market=TATA_INR&userId=${seller.userId}`, undefined, 200, 'GET', buyer.token)).payload.length, 0);
-  await request('/api/v1/order', { market: 'TATA_INR', orderId: sell.payload.orderId }, 404, 'DELETE', buyer.token);
+  assert.equal((await request(`/api/v1/order/open?market=SOL_INR&userId=${seller.userId}`, undefined, 200, 'GET', buyer.token)).payload.length, 0);
+  await request('/api/v1/order', { market: 'SOL_INR', orderId: sell.payload.orderId }, 404, 'DELETE', buyer.token);
   assert.equal(privateEvents.filter(e => e.data?.e === 'account').length, 0, 'seller activity must not reach buyer private stream');
   const buy = await request('/api/v1/order', { ...order, side: 'buy', userId: '1', price: '0.02', quantity: '0.0001' }, 200, 'POST', buyer.token);
   assert.equal(buy.payload.executedQty, 0.0001);
   assert.equal(buy.payload.fills[0].price, '0.01');
-  const cancelled = await request('/api/v1/order', { market: 'TATA_INR', orderId: sell.payload.orderId }, 200, 'DELETE', seller.token);
+  const cancelled = await request('/api/v1/order', { market: 'SOL_INR', orderId: sell.payload.orderId }, 200, 'DELETE', seller.token);
   assert.equal(cancelled.payload.executedQty, 0.0001); assert.equal(cancelled.payload.remainingQty, 0.0002);
-  const missing = await request('/api/v1/order', { market: 'TATA_INR', orderId: sell.payload.orderId }, 404, 'DELETE', seller.token);
+  const missing = await request('/api/v1/order', { market: 'SOL_INR', orderId: sell.payload.orderId }, 404, 'DELETE', seller.token);
   assert.equal(missing.code, 'ORDER_NOT_FOUND');
   await until(async () => {
-    const history = await request('/api/v1/trades?symbol=TATA_INR');
+    const history = await request('/api/v1/trades?symbol=SOL_INR');
     return history.payload.length === 1 && events.some(e => e.data?.e === 'trade') &&
       events.some(e => e.data?.e === 'depth' && e.data.a.some(([p, q]) => p === '0.01' && q === '0'));
   }, 'database and WebSocket events');
@@ -129,12 +131,12 @@ try {
     const rows = (await pool.query('SELECT executed_qty FROM orders')).rows;
     return rows.length === 2 && rows.every(r => Number(r.executed_qty) === 0.0001);
   }, 'maker/taker order persistence');
-  assert.deepEqual((await request('/api/v1/depth?symbol=TATA_INR')).payload, { bids: [], asks: [] });
+  assert.deepEqual((await request('/api/v1/depth?symbol=SOL_INR')).payload, { bids: [], asks: [] });
   await until(() => privateEvents.some(e => e.data?.e === 'account'), 'private account notification');
   assert.ok(privateEvents.filter(e => e.data?.e === 'account').every(e => e.data.snapshot.userId === buyer.userId));
   const finalBuyer = (await request('/api/v1/account', undefined, 200, 'GET', buyer.token)).payload;
   assert.equal(finalBuyer.balances.INR.available, '99999.999999');
-  assert.equal(finalBuyer.balances.TATA.available, '100.0001');
+  assert.equal(finalBuyer.balances.SOL.available, '100.0001');
   await redis.del(`demo:session:${seller.token}`);
   await request('/api/v1/account', undefined, 401, 'GET', seller.token);
   if (process.env.TEST_BROWSER === '1') {
@@ -147,15 +149,24 @@ try {
     const browser = spawn(process.execPath, [join(root, 'frontend/node_modules/@playwright/test/cli.js'), 'test'], {
       cwd: join(root, 'frontend'), env: { ...process.env, TEST_API_URL: `http://127.0.0.1:${apiPort}`, TEST_ARTIFACT_DIR: dir }, stdio: 'inherit',
     });
-    assert.equal(await new Promise((resolve, reject) => { browser.once('exit', resolve); browser.once('error', reject); }), 0, 'browser tests');
+    const browserExit = await new Promise((resolve, reject) => { browser.once('exit', resolve); browser.once('error', reject); });
+    await writeFile(join(dir, 'services.log'), logs);
+    assert.equal(browserExit, 0, 'browser tests');
   }
+  const maker = launch('market-maker');
+  await until(async () => {
+    const { payload } = await request('/api/v1/market?symbol=SOL_INR');
+    return payload.bids.length > 0 && payload.asks.length > 0 &&
+      payload.trades.some(t => Number(t.price) > 900) && payload.candles['5s'].length > 0;
+  }, 'simulator supplies real quotes, fills and candles');
+  maker.kill('SIGTERM');
   // A stopped consumer must produce a bounded HTTP error, not an indefinitely hanging request.
   children.find(c => c.spawnargs.includes(join(root, 'engine', 'dist/index.js'))).kill('SIGTERM');
   await delay(400);
   const snapshot = JSON.parse(await readFile(join(dir, 'snapshot.json'), 'utf8'));
   const balances = Object.fromEntries(snapshot.balances);
   assert.equal(balances[buyer.userId].INR.available, '99999999999'); assert.equal(balances[buyer.userId].INR.locked, '0');
-  assert.equal(balances[seller.userId].TATA.available, '99999900'); assert.equal(balances[seller.userId].TATA.locked, '0');
+  assert.equal(balances[seller.userId].SOL.available, '99999900'); assert.equal(balances[seller.userId].SOL.locked, '0');
   const timeout = await request('/api/v1/order', { ...order, side: 'buy' }, 504, 'POST', buyer.token);
   assert.equal(timeout.code, 'REQUEST_TIMEOUT');
   console.log('PASS: authenticated sessions, ownership, concurrent deduplication, bounded timeout, private notifications;  real HTTP/Redis/engine/worker/PostgreSQL/WebSocket integration; exact fractional settlement, refund, partial cancellation, errors, events and order persistence.');

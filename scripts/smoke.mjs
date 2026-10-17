@@ -34,24 +34,24 @@ try {
     socket.once('open', resolve);
     socket.once('error', reject);
   });
-  socket.send(JSON.stringify({ method: 'SUBSCRIBE', params: ['depth@TATA_INR', 'trade@TATA_INR'] }));
-  const depth = await request('/api/v1/depth?symbol=TATA_INR');
+  socket.send(JSON.stringify({ method: 'SUBSCRIBE', params: ['depth@SOL_INR', 'trade@SOL_INR'] }));
+  const depth = await request('/api/v1/depth?symbol=SOL_INR');
   assert.deepEqual(depth, { bids: [], asks: [] }, 'Use a fresh engine with the market maker stopped');
-  assert.deepEqual(await request('/api/v1/trades?symbol=TATA_INR&limit=1'), [],
+  assert.deepEqual(await request('/api/v1/trades?symbol=SOL_INR&limit=1'), [],
     'Use a fresh disposable database, so old trade IDs cannot satisfy this check');
   while (!events.some(e => e.type === 'SUBSCRIBED')) await new Promise(resolve => setTimeout(resolve, 20));
   const seller = await request('/api/v1/session', {});
   const buyer = await request('/api/v1/session', {});
-  const sell = await request('/api/v1/order', { market: 'TATA_INR', price: '1000', quantity: '1', side: 'sell' }, seller.token);
+  const sell = await request('/api/v1/order', { market: 'SOL_INR', price: '1000', quantity: '1', side: 'sell' }, seller.token);
   assert.ok(sell.orderId);
-  const buy = await request('/api/v1/order', { market: 'TATA_INR', price: '1000', quantity: '1', side: 'buy' }, buyer.token);
+  const buy = await request('/api/v1/order', { market: 'SOL_INR', price: '1000', quantity: '1', side: 'buy' }, buyer.token);
   assert.equal(buy.executedQty, 1);
   assert.equal(buy.fills.length, 1);
   assert.equal(buy.fills[0].price, '1000');
   let persisted = false;
   for (let attempt = 0; attempt < 30; attempt++) {
-    const trades = await request('/api/v1/trades?symbol=TATA_INR&limit=100');
-    const open = await request('/api/v1/order/open?market=TATA_INR', undefined, buyer.token);
+    const trades = await request('/api/v1/trades?symbol=SOL_INR&limit=100');
+    const open = await request('/api/v1/order/open?market=SOL_INR', undefined, buyer.token);
     assert.equal(open.length, 0);
     persisted = trades.some(t => t.id === String(buy.fills[0].tradeId) && t.price === '1000');
     if (persisted && events.some(e => e.data?.e === 'trade' && e.data.t === buy.fills[0].tradeId)) break;

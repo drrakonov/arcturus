@@ -31,7 +31,7 @@ Arcturus is an exchange backend inspired by how platforms like Binance work inte
 ## ⚙️ Tech Stack
 
 - **Runtime:** Node.js + TypeScript
-- **Frontend:** React + TypeScript + Vite
+- **Frontend:** React + TypeScript + Vite, TradingView Lightweight Charts, Lucide icons
 - **API:** Express.js
 - **Message Bus:** Redis (List queue + Pub/Sub)
 - **Database:** TimescaleDB (PostgreSQL + time-series hypertables)
@@ -169,9 +169,9 @@ In a separate terminal, start the trading screen:
 ```bash
 npm run dev:frontend
 ```
-Open http://localhost:5173. Each fresh tab opened via **Open second trader** receives
-an independent demo account with 100,000 INR and 100 TATA. Place a sell limit at 9 for
-3 TATA in one tab, buy 1 TATA at 10 in the other, then cancel the seller's remainder.
+Open http://localhost:5173 for the galaxy landing page, or http://localhost:5173/trade for the dark trading terminal. Each fresh tab opened via **Open second trader** receives
+an independent demo account with 100,000 INR and 100 SOL. Place a sell limit at 9 for
+3 SOL in one tab, buy 1 SOL at 10 in the other, then cancel the seller's remainder.
 The trade executes at 9; balances, recent trades and the book update live.
 The book starts empty until real orders are submitted.
 
@@ -179,7 +179,7 @@ Frontend overrides are `VITE_API_URL` and `VITE_WS_URL` (see `frontend/.env.exam
 Set API `CORS_ORIGIN` to the frontend origin if changing host/port. Vite variables
 are embedded at build time. `npm run build` creates the static frontend in `frontend/dist`.
 
-In a separate terminal, optionally start the simulator:
+To keep the order book and candles moving, start the simulator in a separate terminal:
 ```bash
 npm run start:market-maker
 ```
@@ -264,8 +264,8 @@ The disposable PostgreSQL data uses temporary memory storage and is discarded on
 | `GET` | `/api/v1/tickers` | 24h ticker statistics |
 | `POST` | `/api/v1/markets` | Disabled publicly; market provisioning is internal |
 
-Market-data reads require `?symbol=TATA_INR`; open orders require
-`?market=TATA_INR`. Klines support only `interval=1m`. There is no market-order type.
+Market-data reads require `?symbol=SOL_INR`; open orders require
+`?market=SOL_INR`. Klines support only `interval=1m`. There is no market-order type.
 Private routes require `Authorization: Bearer <session-token>`; user IDs in request
 bodies or queries cannot select another account. Foreign cancellation returns 404.
 Create/cancel requests also require `Idempotency-Key` (8–64 letters, digits or hyphens).
@@ -298,7 +298,7 @@ curl -X POST http://localhost:3000/api/v1/order \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $DEMO_TOKEN" \
   -H "Idempotency-Key: manual-buy-0001" \
-  -d '{"market":"TATA_INR","price":"999","quantity":"1","side":"buy"}'
+  -d '{"market":"SOL_INR","price":"999","quantity":"1","side":"buy"}'
 ```
 
 ### Example — Subscribe to Live Feed (WebSocket)
@@ -309,9 +309,9 @@ wscat -c ws://localhost:3001
 # Authenticate for your own account notifications; wait for READY.
 {"method":"AUTH","token":"<session-token>"}
 # Subscribe; wait for SUBSCRIBED before fetching REST snapshots.
-{"method":"SUBSCRIBE","params":["market@TATA_INR"]}
+{"method":"SUBSCRIBE","params":["market@SOL_INR"]}
 # Legacy public streams are also available:
-{"method":"SUBSCRIBE","params":["depth@TATA_INR","trade@TATA_INR","ticker@TATA_INR"]}
+{"method":"SUBSCRIBE","params":["depth@SOL_INR","trade@SOL_INR","ticker@SOL_INR"]}
 ```
 
 ---
@@ -328,17 +328,25 @@ wscat -c ws://localhost:3001
   This is guest access for virtual trading, not a production identity system.
 - Full market/account snapshots carry generation/revision; the UI resynchronizes on
   reconnect and every 15 seconds to recover missed Pub/Sub notifications.
-- Recent executions are bounded to 50 per market. Charts/history enhancements are later work.
+- Recent executions are bounded to 50 per market. The engine maintains up to 180 real
+  candles each at 5-second and 1-minute intervals, with exact fill volume. Candles survive
+  snapshot restore; fresh engines build history from new executions, without backdating
+  or inventing empty intervals. REST seeds/reconciles history; WS carries current bars.
+  This bounded live chart is separate from the older SQL candle endpoint.
+- Interactive candles/volume use TradingView Lightweight Charts (Apache 2.0); attribution
+  and a TradingView link are displayed in the chart. Lucide supplies the interface icons.
 - Deduplication survives a valid snapshot restore, but is not a crash-proof execution ledger.
   Losing engine state or restoring an older snapshot can lose recent requests/trades.
 - Reliable event delivery remains pending. Session expiry does not cancel resting orders;
   accounts remain in memory until a deliberate demo reset (1,000-account cap).
 - The market maker now uses its own demo session and serial ticks; its random walk still
-  sends real orders to the engine. It has finite virtual funds and no automatic refill.
+  sends real resting quotes and small alternating taker orders to the engine. Demo
+  self-matching is permitted and labelled here; all fills use actual matching/settlement.
+  It has finite virtual funds and no automatic refill.
 - Maker database updates are additive; cancellations are not yet recorded as cancelled in SQL.
 - There is no coordinated engine/database restore: avoid mixing a fresh engine with old
   history in a shared demo. Legacy snapshots are incompatible with version 2.
-- The default market is TATA_INR. Legacy seeded users 1, 2 and 5 are internal only;
+- The default market is SOL_INR. Legacy seeded users 1, 2 and 5 are internal only;
   browser sessions always receive new server-generated account IDs.
 
 The approved roadmap preserves this architecture and adds correctness, a trading frontend,
@@ -347,3 +355,13 @@ Deployment targets are AWS EC2 Free Tier or Render Free Tier, subject to eligibi
 and measured resource fit. Cloud provisioning, public HTTPS/WebSocket verification and
 full-stack resource measurements are deferred to Milestone 6; zero-cost deployment has
 not been verified. No real funds or cryptocurrency custody is involved.
+
+The trading interface adapts [Aceternity UI Tabs](https://ui.aceternity.com/components/tabs) by Manu Arora, using Motion for the selection indicator, with keyboard navigation and reduced-motion support. Charts use TradingView Lightweight Charts; executions and candle data come from the engine.
+
+The landing page uses GSAP for entrance and galaxy motion, with pause and reduced-motion controls. The galaxy is procedural canvas artwork, not market data. Landing and terminal code are loaded separately; static hosting must serve `index.html` for `/trade` (SPA fallback). The landing page does not provision an account until you enter the terminal.
+
+The demo market is `SOL_INR` with 100 virtual SOL per new account. Prices are simulated, not live Solana market quotes. Legacy TATA snapshots are intentionally not converted: retain them separately and start a fresh demo with `WITH_SNAPSHOT` empty. SOL sessions should start fresh after switching from a stock demo. The official Solana logomark is from [Solana brand assets](https://solana.com/branding).
+
+Landing-page scrolling uses [Lenis](https://github.com/darkroomengineering/lenis), driven by the GSAP ticker. Pausing motion or enabling reduced motion restores native scrolling. The terminal also uses Lenis for page scrolling; chart, trade-tape and order-table interactions retain native scrolling. Reduced motion restores native page scrolling.
+
+The landing journey uses a lazy-loaded Three.js particle galaxy and GSAP ScrollTrigger to move the camera through three chapters. Desktop cursor movement adds subtle parallax. Rendering is capped at 30 FPS with a 1.5 pixel-ratio limit and fewer galaxy particles on mobile; drawing stops offscreen or in hidden tabs. Pause/reduced motion uses a static, readable layout; unavailable WebGL retains canvas artwork. The optional Three.js chunk is about 192 KB gzipped and is never loaded by the trading terminal.
