@@ -22,7 +22,7 @@ export class User {
         if (this.ws.bufferedAmount > 1_000_000) { this.ws.close(1013, 'Slow connection; reconnect'); return; }
         this.ws.send(JSON.stringify(message));
     }
-    emit(message: OutgoingMessage) { this.send(message); }
+    emit(message: OutgoingMessage) { this.send(message.data.e === 'trace' ? { ...message, data: { ...message.data, forwardedAt: Date.now() } } : message); }
     private async receive(raw: string) {
         if (this.closed) return;
         let message;

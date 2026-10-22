@@ -1,6 +1,7 @@
 // Runs host services against user-managed local Redis/PostgreSQL; never invokes Docker.
 // Creates and removes its own PostgreSQL database; requires an unused Redis DB 15.
 import assert from 'node:assert/strict';
+import { verifyLab } from './lab-integration.mjs';
 import { verifyHistory } from './history-integration.mjs';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -21,7 +22,8 @@ const db = `arcturus_m2_${process.pid}_${Date.now()}`;
 const pgConfig = { host: '127.0.0.1', port: Number(process.env.TEST_POSTGRES_PORT ?? 15432),
   user: 'your_user', password: 'your_password', connectionTimeoutMillis: 3000 };
 const redisUrl = `redis://127.0.0.1:${Number(process.env.TEST_REDIS_PORT ?? 16379)}/15`;
-const env = { ...process.env, REDIS_URL: redisUrl, POSTGRES_HOST: pgConfig.host,
+const operatorKey = randomUUID();
+const env = { ...process.env, DEMO_CONTROL_TOKEN: operatorKey, REDIS_URL: redisUrl, POSTGRES_HOST: pgConfig.host,
   POSTGRES_PORT: String(pgConfig.port), POSTGRES_USER: pgConfig.user, POSTGRES_PASSWORD: pgConfig.password,
   API_BASE_URL: `http://127.0.0.1:${Number(process.env.TEST_API_PORT ?? 13000)}`, TOTAL_BIDS: '4', TOTAL_ASKS: '4', INTERVAL_MS: '250',
   POSTGRES_DB: db, WITH_SNAPSHOT: '', CORS_ORIGIN: 'http://127.0.0.1:15173', REQUEST_TIMEOUT_MS: '1200' };
@@ -49,10 +51,10 @@ async function until(check, label) {
   }
   throw new Error(`Timed out: ${label}`);
 }
-async function request(path, body, status = 200, method = 'POST', token, key = randomUUID()) {
+async function request(path, body, status = 200, method = 'POST', token, key = randomUUID(), controlKey) {
   const res = await fetch(`http://127.0.0.1:${apiPort}${path}`, { method: body ? method : 'GET',
     headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key,
-      ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(controlKey ? {'X-Demo-Control-Token':controlKey}:{}) },
     ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(4000) });
   const result = await res.json();
   assert.equal(res.status, status, `${path}: ${JSON.stringify(result)}`);
@@ -157,12 +159,13 @@ try {
     for (const stream of [vite.stdout, vite.stderr]) stream.on('data', data => { logs += `[vite] ${data}`; });
     await until(async () => { try { return (await fetch('http://127.0.0.1:15173')).ok; } catch { return false; } }, 'frontend');
     const browser = spawn(process.execPath, [join(root, 'frontend/node_modules/@playwright/test/cli.js'), 'test'], {
-      cwd: join(root, 'frontend'), env: { ...process.env, TEST_API_URL: `http://127.0.0.1:${apiPort}`, TEST_ARTIFACT_DIR: dir }, stdio: 'inherit',
+      cwd: join(root, 'frontend'), env: { ...process.env, TEST_API_URL: `http://127.0.0.1:${apiPort}`, TEST_ARTIFACT_DIR: dir, TEST_DEMO_CONTROL_TOKEN: operatorKey }, stdio: 'inherit',
     });
     const browserExit = await new Promise((resolve, reject) => { browser.once('exit', resolve); browser.once('error', reject); });
     await writeFile(join(dir, 'services.log'), logs);
     assert.equal(browserExit, 0, 'browser tests');
   }
+  await verifyLab({ pool, redis, request, session, until, operatorKey });
   await verifyHistory({ pool, redis, request, session, launch, children, until });
   const maker = launch('market-maker');
   await until(async () => {
@@ -196,7 +199,7 @@ finally {
   await admin.end();
   if (redis.isOpen) {
     if (ownsRedis) {
-      const keys = await redis.keys('demo:session:*');
+      const keys = [...await redis.keys('demo:session:*'), ...await redis.keys('trace:*'), 'demo:pause', 'demo:worker-paused', 'demo:pause-cooldown'];
       await redis.del(['message', 'db_processor', 'db_processor:processing', 'db_processor:failed', ...keys]);
     }
     await redis.quit();

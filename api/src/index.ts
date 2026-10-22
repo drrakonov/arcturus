@@ -1,3 +1,4 @@
+import { telemetry, scenario, pause } from './controllers/demo.controller.js';
 import dotenv from 'dotenv'
 dotenv.config();
 import express from 'express'
@@ -19,6 +20,9 @@ app.use(express.json());
 
 app.post('/api/v1/session', createSession);
 app.get('/api/v1/account/trades', requireSession, getAccountTrades);
+app.get('/api/v1/demo/telemetry', requireSession, telemetry);
+app.post('/api/v1/demo/scenario', requireSession, scenario);
+app.post('/api/v1/demo/persistence-delay', requireSession, pause);
 app.get('/api/v1/account', requireSession, getAccount);
 app.get('/api/v1/market', getMarket);
 app.use("/api/v1/order", requireSession, orderRouter);

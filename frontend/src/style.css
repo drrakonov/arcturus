@@ -1037,3 +1037,29 @@ button.submit[data-clicked] { box-shadow:inset 0 0 0 2px #c7ffea; }
 .history-controls button:disabled { opacity: .45; cursor: default; }
 .history-note { font-size: 11px; color: #969ca9; }
 .history-error { padding: 8px; font-size: 11px; color: #f4b56b; }
+
+/* Service observations and execution details share the terminal's compact surfaces. */
+.engineering { margin-top: 20px; padding: 0 20px 20px; }
+.engineering .panel-heading { padding-inline: 0; }
+.engineering p { color: var(--muted, #8c96a6); font-size: 13px; line-height: 1.6; }
+.engineering button, .engineering select, .order-type select { background: #20242c; color: #e1e5ed; border: 1px solid #353b47; border-radius: 5px; padding: 8px 10px; }
+.engineering label { display: inline-flex; gap: 10px; align-items: center; margin: 10px 16px 10px 0; font-size: 13px; }
+.engineering input { background: #12151b; color: #e1e5ed; border: 1px solid #353b47; padding: 8px; border-radius: 5px; max-width: 200px; }
+.service-flow { display: grid; grid-template-columns: repeat(6,1fr); gap: 10px; margin: 16px 0; }
+.service-flow > div { border: 1px solid #30343f; border-radius: 6px; padding: 15px 12px; font-size: 13px; }
+.service-flow small { display: block; color: #8c96a6; margin-top: 6px; font-size: 11px; }
+.service-flow i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #5b616d; margin-right: 8px; }
+.service-flow .observed { border-color: #336753; background: #14251f; }
+.service-flow .observed i { background: #66d4a6; }
+.trace-events { max-height: 180px; overflow: auto; font-size: 12px; }
+.trace-events > div { display: flex; gap: 16px; align-items: center; padding: 5px 0; }
+.trace-events time { color: #8c96a6; font-variant-numeric: tabular-nums; }
+.trace-events button { margin-left: auto; }
+.demo-controls { border-top: 1px solid #30343f; padding-top: 16px; }
+.demo-controls summary { cursor: pointer; font-size: 14px; }
+.lab-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.scenario-result { border-left: 2px solid #66d4a6; padding: 5px 16px; margin-top: 16px; font-size: 13px; line-height: 1.8; }
+.execution-metrics { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin: 20px 0; font-size: 12px; color: #8c96a6; }
+.execution-metrics strong { display: block; color: #e1e5ed; font-size: 15px; margin-top: 5px; overflow-wrap: anywhere; }
+.mono { font-family: monospace; font-size: 11px; overflow-wrap: anywhere; }
+@media(max-width: 700px) { .service-flow { grid-template-columns: repeat(2,1fr); } .execution-metrics { grid-template-columns: repeat(2,1fr); } .engineering label { flex-wrap: wrap; } .engineering { padding-inline: 12px; } }

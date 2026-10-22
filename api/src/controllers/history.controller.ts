@@ -8,7 +8,7 @@ export async function getOrderHistory(req: Request, res: Response) {
         const market = queryMarket(req.query.market);
         const limit = queryInteger(req.query.limit, 50, 1, 100), cursor = decodeCursor(req.query.cursor);
         const { rows } = await getPgPool().query(`SELECT order_id AS "orderId", user_id AS "userId", market, side,
-            price, quantity, executed_qty AS "executedQty", status,
+            order_type AS "orderType", price, quantity, executed_qty AS "executedQty", status,
             extract(epoch FROM created_at)*1000 AS "createdAt", extract(epoch FROM updated_at)*1000 AS "updatedAt"
             FROM orders WHERE user_id=$1 AND market=$2
             AND ($3::timestamptz IS NULL OR (updated_at,order_id)<($3::timestamptz,$4::text))

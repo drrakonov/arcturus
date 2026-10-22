@@ -1,9 +1,11 @@
+import type { TraceEvent } from '../../packages/contracts/src/index';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { mergeMarket } from './market';
 import { ApiError, newer, request, wsUrl } from './client';
 import type { AccountSnapshot, MarketSnapshot, PendingAction, Session } from './client';
 
 export function useTerminal() {
+  const [traces, setTraces] = useState<(TraceEvent & { forwardedAt?: number; receivedAt?: number })[]>([]);
   const [session, setSession] = useState<Session | null>(null);
   const [account, setAccount] = useState<AccountSnapshot | null>(null);
   const [market, setMarket] = useState<MarketSnapshot | null>(null);
@@ -75,6 +77,7 @@ export function useTerminal() {
           void sync();
           refresh = setInterval(() => void sync(), 15_000);
         }
+        if (message.data?.e === 'trace') setTraces(old => [{ ...message.data.event, forwardedAt: message.data.forwardedAt, receivedAt: Date.now() }, ...old].slice(0,100));
         if (message.data?.e === 'market') setMarket(old => mergeMarket(old, message.data.snapshot));
         if (message.data?.e === 'account' && message.data.snapshot.userId === session.userId) {
           setAccount(old => newer(old, message.data.snapshot)); setNotice('Account updated · balances and open orders synchronized');
@@ -101,9 +104,9 @@ export function useTerminal() {
     inFlight.current = true; setBusy(true); setError('');
     setPending(action); sessionStorage.setItem('arcturus-pending', JSON.stringify(action));
     try {
-      const result = await request<{ executedQty: number; orderId: string }>(action.path, session.token, action);
+      const result = await request<{ executedQty: number; orderId: string; cancelledQty?: number }>(action.path, session.token, action);
       setNotice(action.method === 'DELETE' ? 'Order cancelled · remaining funds released' :
-        result.executedQty > 0 ? `Order accepted · ${result.executedQty} SOL filled` : 'Limit order placed · waiting for a matching order');
+        result.executedQty > 0 ? `Order accepted · ${result.executedQty} SOL filled${result.cancelledQty ? ` · ${result.cancelledQty} cancelled` : ''}` : 'Limit order placed · waiting for a matching order');
       setPending(null); sessionStorage.removeItem('arcturus-pending');
       try {
         const a = await request<AccountSnapshot>('/api/v1/account', session.token);
@@ -119,10 +122,10 @@ export function useTerminal() {
     void execute({ path: '/api/v1/order', method, body, key: crypto.randomUUID(), createdAt: Date.now(), label });
   };
   const restart = () => {
-    socket.current?.close(); setSession(null); setAccount(null); setMarket(null);
+    socket.current?.close(); setTraces([]); setSession(null); setAccount(null); setMarket(null);
     sessionStorage.removeItem('arcturus-token'); sessionStorage.removeItem('arcturus-pending'); setPending(null); setAttempt(x => x + 1);
   };
-  return { session, account, market, status, error, notice, busy, pending, mutate,
+  return { traces, session, account, market, status, error, notice, busy, pending, mutate,
     retry: () => pending ? void execute(pending) : setAttempt(x => x + 1), restart,
     dismissError: () => setError(''), clearPending: () => { setPending(null); sessionStorage.removeItem('arcturus-pending'); } };
 }

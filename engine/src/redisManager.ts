@@ -1,7 +1,7 @@
 import { createClient, type RedisClientType } from "redis"
 import type { WsMessage } from "./types/toWs.js"
 import type { MessageToApi } from "./types/toApi.js"
-import type { DbMessage } from "@arcturus/contracts";
+import type { DbMessage, TraceEvent } from "@arcturus/contracts";
 
 export class RedisManager {
     private client: RedisClientType;
@@ -32,6 +32,12 @@ export class RedisManager {
         return this.instance;
     }
 
+    public trace(userId: string, event: TraceEvent) {
+        const raw = JSON.stringify(event);
+        void this.client.multi().lPush(`trace:${userId}`, raw).lTrim(`trace:${userId}`, 0, 99)
+            .expire(`trace:${userId}`, 28800).publish(`account@${userId}`, JSON.stringify({ stream: `account@${userId}`, data: { e: 'trace', event } }))
+            .exec().catch(error => console.error('Trace unavailable:', error.message));
+    }
     public pushMessage(message: DbMessage) {
         this.client.lPush("db_processor", JSON.stringify(message))
             .catch((err) => console.error("RedisManager.pushMessage failed:", err));

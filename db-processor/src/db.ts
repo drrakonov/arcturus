@@ -79,6 +79,7 @@ export async function runMigrations(): Promise<void> {
         `);
 
         await client.query(`
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type TEXT NOT NULL DEFAULT 'limit';
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS user_id TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS history_id TEXT;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT;
@@ -96,6 +97,8 @@ export async function runMigrations(): Promise<void> {
             CREATE INDEX IF NOT EXISTS orders_retention ON orders(updated_at);
             CREATE INDEX IF NOT EXISTS trades_history_time ON trades(history_id, market, timestamp DESC, sequence DESC);
             CREATE INDEX IF NOT EXISTS trades_buyer_time ON trades(buyer_id, timestamp DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS trades_maker_order ON trades(maker_order_id, timestamp DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS trades_taker_order ON trades(taker_order_id, timestamp DESC, id DESC);
             CREATE INDEX IF NOT EXISTS trades_seller_time ON trades(seller_id, timestamp DESC, id DESC);
         `);
 
