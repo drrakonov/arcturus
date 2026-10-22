@@ -1,99 +1,55 @@
-import dotenv from "dotenv";
+import dotenv from 'dotenv';
 dotenv.config();
+import { createClient } from 'redis';
+import { runMigrations, closePool, getPool } from './db.js';
+import { persistBatch, pruneHistory } from './persistence.js';
+import { acknowledge, claim, quarantine, replayFailed, QUEUE } from './queue.js';
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-import { createClient, type RedisClientType } from "redis";
-import { runMigrations, closePool } from "./db.js";
-import { insertTrade, upsertOrder } from "./queries.js";
-import { TRADE_ADDED, ORDER_UPDATE, type DbMessage } from "./types.js";
-
-const QUEUE_KEY = "db_processor";
-
-async function main(): Promise<void> {
-    // ── 1. Run schema migrations first ───────────────────────────────────────────
-    console.log("[db-processor] Running migrations…");
-    await runMigrations();
-
-    // ── 2. Connect to Redis ───────────────────────────────────────────────────────
-    const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
-    const redis = createClient({ url: redisUrl }) as RedisClientType;
-
-    redis.on("error", (err) => console.error("[redis] Client error:", err));
+async function main() {
+    const redis = createClient({ url: process.env.REDIS_URL ?? 'redis://localhost:6379' });
+    redis.on('error', error => console.error('[redis]', error.message));
     await redis.connect();
-    console.log(`[db-processor] Connected to Redis at ${redisUrl}`);
-    console.log(`[db-processor] Waiting for messages on "${QUEUE_KEY}"…`);
-
-    // ── 3. shutdown ──────────────────────────────────────────────────────
-    let shuttingDown = false;
-
-    async function shutdown(signal: string): Promise<void> {
-        if (shuttingDown) return;
-        shuttingDown = true;
-        console.log(`\n[db-processor] Received ${signal}, shutting down…`);
-        try {
-            // disconnect() immediately drops the TCP connection, which causes
-            // the in-flight brPop to throw, allowing the loop to exit cleanly.
-            // quit() deadlocks here because brPop holds the connection open.
-            await redis.disconnect();
-            await closePool();
-        } catch (err) {
-            console.error("[db-processor] Error during shutdown:", err);
-        }
-        process.exit(0);
+    if (process.argv[2] === '--replay-failed') {
+        console.log(`Requeued ${await replayFailed(redis, Number(process.argv[3] ?? 50))} failed events`);
+        await redis.quit(); return;
     }
-
-    process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
-    process.on("SIGINT",  () => { void shutdown("SIGINT"); });
-
-    // ── 4. Main consume loop ──────────────────────────────────────────────────────
-    while (!shuttingDown) {
-        let raw: string | null = null;
-        try {
-            // brPop with a 1-second timeout: wakes up every second so the
-            // shuttingDown flag is checked and Ctrl+C responds immediately.
-            const result = await redis.brPop(QUEUE_KEY, 1);
-            raw = result?.element ?? null;
-        } catch (err) {
-            // brPop throws when the client is closed during shutdown
-            if (shuttingDown) break;
-            console.error("[redis] brPop error:", err);
-            await sleep(1000);
-            continue;
+    // A dedicated PostgreSQL session enforces the single-worker assumption.
+    const lock = await getPool().connect();
+    const acquired = await lock.query('SELECT pg_try_advisory_lock(7283103) AS acquired');
+    if (!acquired.rows[0].acquired) throw new Error('Another database worker is already running');
+    let stopping = false;
+    lock.on('error', () => { stopping = true; });
+    const stop = () => { stopping = true; };
+    process.once('SIGTERM', stop); process.once('SIGINT', stop);
+    try {
+        console.log('[db-processor] Running migrations…');
+        await runMigrations();
+        console.log(`[db-processor] Waiting for messages on "${QUEUE}"…`);
+        let nextPrune = 0;
+        while (!stopping) {
+            try {
+                if (Date.now() >= nextPrune) { await pruneHistory(); nextPrune = Date.now() + 60_000; }
+                const raw = await claim(redis);
+                if (raw === null) continue;
+                let failure: unknown, persisted = false, attempts = 0;
+                for (; attempts < 3 && !stopping; attempts++) {
+                    try { await persistBatch(JSON.parse(raw)); persisted = true; break; }
+                    catch (error) { failure = error; await sleep(200 * 2 ** attempts); }
+                }
+                if (persisted) await acknowledge(redis, raw);
+                else if (!stopping) {
+                    const message = failure instanceof Error ? failure.message : 'Persistence failed';
+                    if (await quarantine(redis, raw, message, attempts)) console.error('[db-processor] Event retained in failed queue:', message);
+                    else { console.error('[db-processor] Failed queue full; consumption paused'); await sleep(1000); }
+                }
+            } catch (error) { console.error('[db-processor] Retryable worker error:', error); await sleep(1000); }
         }
-
-        if (!raw) continue;
-
-        let message: DbMessage;
-        try {
-            message = JSON.parse(raw) as DbMessage;
-        } catch (err) {
-            console.error("[db-processor] Failed to parse message:", raw, err);
-            continue;
-        }
-
-        try {
-            switch (message.type) {
-                case TRADE_ADDED:
-                    await insertTrade(message.data);
-                    break;
-                case ORDER_UPDATE:
-                    await upsertOrder(message.data);
-                    break;
-                default:
-                    // TypeScript exhaustive check
-                    console.warn("[db-processor] Unknown message type:", (message as { type: string }).type);
-            }
-        } catch (err) {
-            console.error(`[db-processor] Failed to persist message (type=${message.type}):`, err);
-            // push to a dead-letter queue instead of dropping
-        }
+    } finally {
+        // Leave any unacknowledged claim for the next worker, including on SIGTERM.
+        await redis.quit();
+        await lock.query('SELECT pg_advisory_unlock(7283103)').catch(() => {});
+        lock.release(); await closePool();
     }
 }
-
-function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-main().catch((err) => {
-    console.error("[db-processor] Fatal startup error:", err);
-    process.exit(1);
-});
+main().catch(error => { console.error('[db-processor] Fatal:', error); process.exit(1); });

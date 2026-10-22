@@ -83,8 +83,8 @@ test('best-price then FIFO matching, maker-price execution and partial maker pri
     assert.deepEqual(result.fills.map(f => [f.price, f.qty]), [['10', 2], ['10', 1]]);
     const next = ctx.place(taker, taker === 'buy' ? '12' : '8', '2');
     assert.deepEqual(next.fills.map(f => [f.price, f.qty]), [['10', 1], [prices[0], 1]]);
-    const makerUpdates = ctx.events.filter(e => e.type === 'ORDER_UPDATE' && !e.data.market);
-    assert.deepEqual(makerUpdates.map(e => e.data.orderId), [orders[1].orderId, orders[2].orderId, orders[2].orderId, orders[0].orderId]);
+    const makerUpdates = ctx.events.filter(e => e.type === 'PERSISTENCE_BATCH').flatMap(e => e.orders.slice(1));
+    assert.deepEqual(makerUpdates.map(e => e.orderId), [orders[1].orderId, orders[2].orderId, orders[2].orderId, orders[0].orderId]);
     assert.deepEqual([...result.fills, ...next.fills].map(f => f.tradeId), [0, 1, 2, 3]);
   }
 });
@@ -97,7 +97,7 @@ test('fractional fills and minimum tick/lot settle exactly without dust', () => 
   assert.equal(balance(ctx.engine, '2', 'SOL').locked, '0');
   assert.deepEqual(totals(ctx.engine), before);
   assert.deepEqual(ctx.command('GET_DEPTH', { market }).payload, { bids: [], asks: [] });
-  assert.deepEqual(ctx.events.filter(e => e.type === 'TRADE_ADDED').map(e => e.data.quoteQuantity), ['0.000001', '0.000001', '0.000001']);
+  assert.deepEqual(ctx.events.filter(e => e.type === 'PERSISTENCE_BATCH').flatMap(e => e.trades).map(e => e.quoteQuantity), ['0.000001', '0.000001', '0.000001']);
 });
 test('invalid direct commands and queue messages cannot alter balances or order books', () => {
   const ctx = setup();
@@ -156,7 +156,7 @@ test('trade maker flags depend on resting side, not user identity', () => {
   for (const side of ['buy', 'sell']) {
     const ctx = setup();
     ctx.place(side, '10', '1'); ctx.place(side === 'buy' ? 'sell' : 'buy', '10', '1');
-    assert.equal(ctx.events.find(e => e.type === 'TRADE_ADDED').data.isBuyerMaker, side === 'buy');
+    assert.equal(ctx.events.filter(e => e.type === 'PERSISTENCE_BATCH').flatMap(e => e.trades)[0].isBuyerMaker, side === 'buy');
     assert.equal(ctx.events.find(e => e.data?.e === 'trade').data.m, side === 'buy');
   }
 });

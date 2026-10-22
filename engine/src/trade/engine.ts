@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { TradingError, validateMessage, parseDecimal, formatDecimal } from '@arcturus/contracts';
-import type { DbMessage, MessageToApi, WsMessage, AccountSnapshot, MarketSnapshot, RecentTrade, Candle, CandleInterval } from '@arcturus/contracts';
+import type { DbMessage, MessageToApi, WsMessage, AccountSnapshot, MarketSnapshot, RecentTrade, Candle, CandleInterval, HistoryOrder, HistoryTrade } from '@arcturus/contracts';
 import { Orderbook, toWireOrder, type BookOrder, type Fill } from './orderbook.js';
 
 import { addFill } from './candles.js';
@@ -30,6 +30,7 @@ export class Engine {
     private orderbooks: Orderbook[] = [];
     private balances: Balances = new Map();
     private generation = randomUUID();
+    private historyId = randomUUID();
     private revision = 0;
     private recentTrades = new Map<string, RecentTrade[]>();
     private candles = new Map<string, Record<CandleInterval, Candle[]>>();
@@ -124,7 +125,8 @@ export class Engine {
             throw new TradingError('LIMIT_EXCEEDED', 'Book capacity reached');
         const book = original.clone();
         const balances = cloneBalances(this.balances);
-        const order: BookOrder = { price: parseDecimal(price, 2), quantity: parseDecimal(quantity, 4),
+        const timestamp = this.now();
+        const order: BookOrder = { createdAt: timestamp, price: parseDecimal(price, 2), quantity: parseDecimal(quantity, 4),
             side, userId, orderId: this.orderId(), filled: 0n };
         const reserve = side === 'buy' ? order.price * order.quantity : order.quantity * 100n;
         const funds = asset(balances, userId, side === 'buy' ? book.quoteAsset : book.baseAsset);
@@ -148,13 +150,12 @@ export class Engine {
             buyerBase.available += fill.qty * 100n;
         }
         this.commit(original, book, balances);
-        this.emit(() => this.publishOrder(order, fills, market));
-        this.emit(() => this.publishDepth(original, book));
         this.revision++;
+        this.emit(() => this.publishOrder(order, fills, market, original, timestamp));
+        this.emit(() => this.publishDepth(original, book));
         const recent = this.recentTrades.get(market) ?? [];
         const candles = this.candles.get(market) ?? { '5s': [], '1m': [] };
         for (const fill of fills) {
-            const timestamp = this.now();
             recent.unshift({ id: String(fill.tradeId), price: formatDecimal(fill.price, 2),
                 quantity: formatDecimal(fill.qty, 4), isBuyerMaker: side === 'sell', timestamp });
             for (const interval of ['5s', '1m'] as const) addFill(candles[interval], fill.price, fill.qty, timestamp, interval);
@@ -182,6 +183,10 @@ export class Engine {
         this.commit(original, book, balances);
         this.emit(() => this.publishDepth(original, book));
         this.revision++;
+        const timestamp = this.now();
+        this.emit(() => this.sink.pushMessage({ type: 'PERSISTENCE_BATCH', version: 1,
+            eventId: randomUUID(), historyId: this.historyId, revision: this.revision, timestamp,
+            orders: [this.historyOrder(order, market, timestamp, true)], trades: [] }));
         this.notify(market, [userId]);
         return { orderId, executedQty: numberQty(order.filled), remainingQty: numberQty(remaining) };
     }
@@ -202,7 +207,7 @@ export class Engine {
     }
     getMarket(market: string, history = true): MarketSnapshot {
         const depth = this.book(market).getDepth();
-        return { market, generation: this.generation, revision: this.revision,
+        return { market, generation: this.generation, historyId: this.historyId, revision: this.revision,
             bids: depth.bids.slice(0, 20), asks: depth.asks.slice(0, 20), trades: structuredClone(this.recentTrades.get(market) ?? []),
             candleHistory: history, candles: Object.fromEntries((['5s', '1m'] as const).map(interval =>
                 [interval, structuredClone(history ? this.candles.get(market)?.[interval] ?? [] : this.candles.get(market)?.[interval].slice(-1) ?? [])])) as Record<CandleInterval, Candle[]> };
@@ -272,18 +277,32 @@ export class Engine {
         this.balances = balances;
         this.usedTxnIds.add(txnId);
     }
-    private publishOrder(order: BookOrder, fills: Fill[], market: string) {
-        this.sink.pushMessage({ type: 'ORDER_UPDATE', data: { orderId: order.orderId,
-            executedQty: numberQty(order.filled), market, price: formatDecimal(order.price, 2),
-            quantity: formatDecimal(order.quantity, 4), side: order.side } });
+    private historyOrder(order: BookOrder, market: string, timestamp: number, cancelled = false): HistoryOrder {
+        return { orderId: order.orderId, userId: order.userId, market, side: order.side,
+            price: formatDecimal(order.price, 2), quantity: formatDecimal(order.quantity, 4),
+            executedQty: formatDecimal(order.filled, 4), createdAt: order.createdAt ?? timestamp, updatedAt: timestamp,
+            status: cancelled ? 'cancelled' : order.filled === order.quantity ? 'filled' : order.filled > 0n ? 'partially_filled' : 'open' };
+    }
+    private publishOrder(order: BookOrder, fills: Fill[], market: string, before: Orderbook, timestamp: number) {
+        const makers = new Map([...before.bids, ...before.asks].map(o => [o.orderId, { ...o }]));
+        const orders = [this.historyOrder(order, market, timestamp)];
+        const trades: HistoryTrade[] = [];
         for (const f of fills) {
-            const price = formatDecimal(f.price, 2), quantity = formatDecimal(f.qty, 4);
-            const isBuyerMaker = order.side === 'sell';
-            this.sink.pushMessage({ type: 'ORDER_UPDATE', data: { orderId: f.makerOrderId, executedQty: numberQty(f.qty) } });
-            this.sink.pushMessage({ type: 'TRADE_ADDED', data: { id: String(f.tradeId), isBuyerMaker,
-                price, quantity, quoteQuantity: formatDecimal(f.price * f.qty, 6), market, timestamp: this.now() } });
+            const maker = makers.get(f.makerOrderId)!;
+            maker.filled += f.qty;
+            orders.push(this.historyOrder(maker, market, timestamp));
+            trades.push({ id: `${this.historyId}:${market}:${f.tradeId}`, sequence: f.tradeId,
+                isBuyerMaker: order.side === 'sell', price: formatDecimal(f.price, 2), quantity: formatDecimal(f.qty, 4),
+                quoteQuantity: formatDecimal(f.price * f.qty, 6), market, timestamp,
+                buyerId: order.side === 'buy' ? order.userId : f.otherUserId,
+                sellerId: order.side === 'sell' ? order.userId : f.otherUserId,
+                makerOrderId: f.makerOrderId, takerOrderId: order.orderId });
+        }
+        this.sink.pushMessage({ type: 'PERSISTENCE_BATCH', version: 1, eventId: randomUUID(),
+            historyId: this.historyId, revision: this.revision, timestamp, orders, trades });
+        for (const f of fills) {
             this.sink.publishMessage(`trade@${market}`, { stream: `trade@${market}`,
-                data: { e: 'trade', t: f.tradeId, m: isBuyerMaker, p: price, q: quantity, s: market } });
+                data: { e: 'trade', t: f.tradeId, m: order.side === 'sell', p: formatDecimal(f.price, 2), q: formatDecimal(f.qty, 4), s: market } });
         }
         if (fills.length) {
             const prices = fills.map(f => f.price);
@@ -310,7 +329,7 @@ export class Engine {
         });
     }
     getSnapshot() {
-        return { version: 2, generation: this.generation, revision: this.revision, requests: [...this.requests],
+        return { version: 2, historyId: this.historyId, generation: this.generation, revision: this.revision, requests: [...this.requests],
             candles: [...this.candles], recentTrades: [...this.recentTrades], orderbooks: this.orderbooks.map(b => ({ baseAsset: b.baseAsset,
             bids: b.bids.map(o => ({ ...o, price: String(o.price), quantity: String(o.quantity), filled: String(o.filled) })),
             asks: b.asks.map(o => ({ ...o, price: String(o.price), quantity: String(o.quantity), filled: String(o.filled) })),
@@ -325,6 +344,7 @@ export class Engine {
             throw new Error('Legacy TATA snapshot: preserve it and start a fresh SOL demo with WITH_SNAPSHOT empty; assets and executions are not converted');
         }
         // Each process boot has a new generation, including rollback to an older snapshot.
+        this.historyId = snapshot.historyId ?? this.historyId;
         this.revision = snapshot.revision ?? 0;
         this.requests = new Map(snapshot.requests ?? []);
         this.recentTrades = new Map(snapshot.recentTrades ?? []);

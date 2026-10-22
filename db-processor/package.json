@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc -b",
     "start": "node dist/index.js",
+    "replay:failed": "node dist/index.js --replay-failed",
     "dev": "npm run build && npm run start",
     "typecheck": "tsc --noEmit --incremental false"
   },

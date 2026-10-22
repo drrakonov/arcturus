@@ -258,14 +258,21 @@ The disposable PostgreSQL data uses temporary memory storage and is discarded on
 | `POST` | `/api/v1/order` | Place an order for the authenticated account |
 | `DELETE` | `/api/v1/order` | Cancel an order |
 | `GET` | `/api/v1/order/open` | Get own open orders (session required) |
+| `GET` | `/api/v1/order/history` | Own saved order lifecycle, including cancellations |
+| `GET` | `/api/v1/account/trades` | Own saved executions |
 | `GET` | `/api/v1/depth` | Get order book depth |
 | `GET` | `/api/v1/trades` | Recent trade history |
-| `GET` | `/api/v1/klines` | OHLCV candlestick data (1m) |
+| `GET` | `/api/v1/klines` | Stored OHLCV candles (5s / 1m) |
 | `GET` | `/api/v1/tickers` | 24h ticker statistics |
 | `POST` | `/api/v1/markets` | Disabled publicly; market provisioning is internal |
 
 Market-data reads require `?symbol=SOL_INR`; open orders require
-`?market=SOL_INR`. Klines support only `interval=1m`. There is no market-order type.
+`?market=SOL_INR`. History routes also require `market`, accept `limit=1..100`
+and an opaque `cursor`, and return `{ rows, nextCursor }`. Klines require the current
+market snapshot's `historyId`, support `interval=5s` or `1m`, and return the latest
+up to 500 bars in chronological order. Optional `startTime`/`endTime` are Unix
+milliseconds; each query spans at most one day (5s) or seven days (1m).
+There is no market-order type.
 Private routes require `Authorization: Bearer <session-token>`; user IDs in request
 bodies or queries cannot select another account. Foreign cancellation returns 404.
 Create/cancel requests also require `Idempotency-Key` (8–64 letters, digits or hyphens).
@@ -322,7 +329,10 @@ wscat -c ws://localhost:3001
 - Orders and balances live in memory; snapshots are written every three seconds and on shutdown.
 - Snapshot restoration is opt-in, writes are not atomic, and pending events are not replayed.
 - Redis lists carry commands and persistence events; Pub/Sub carries replies and live data.
-- Database writes are asynchronous and currently lack reliable retry handling.
+- Database writes remain asynchronous. Each committed command emits one batch; order
+  lifecycle updates, fills and an event deduplication record commit in one SQL transaction.
+  Absolute fill quantities and revisions prevent duplicate/out-of-order delivery from
+  incrementing totals or reopening cancelled orders.
 - Matching, settlement and cancellation use exact integer units and checked in-memory transactions.
 - Sessions are bearer tokens in per-tab sessionStorage with an eight-hour Redis TTL.
   This is guest access for virtual trading, not a production identity system.
@@ -332,20 +342,36 @@ wscat -c ws://localhost:3001
   candles each at 5-second and 1-minute intervals, with exact fill volume. Candles survive
   snapshot restore; fresh engines build history from new executions, without backdating
   or inventing empty intervals. REST seeds/reconciles history; WS carries current bars.
-  This bounded live chart is separate from the older SQL candle endpoint.
+  The chart backfills up to 500 stored bars and accumulates at most 1,000 bars per view.
+  Engine bars win overlaps with delayed SQL responses. SQL candles aggregate actual raw
+  fills with trade sequence as a timestamp tie-breaker; they include the current bucket
+  without waiting for the legacy continuous aggregate refresh.
 - Interactive candles/volume use TradingView Lightweight Charts (Apache 2.0); attribution
   and a TradingView link are displayed in the chart. Lucide supplies the interface icons.
 - Deduplication survives a valid snapshot restore, but is not a crash-proof execution ledger.
   Losing engine state or restoring an older snapshot can lose recent requests/trades.
-- Reliable event delivery remains pending. Session expiry does not cancel resting orders;
+- Once an event reaches Redis, the single database worker claims it into a processing
+  list and acknowledges only after commit. A PostgreSQL advisory lock prevents competing
+  workers on the same database. Startup resumes unacknowledged claims; three failed
+  attempts retain the event in `db_processor:failed`. At 1,000 failed events consumption
+  pauses instead of deleting failures. Engine-to-Redis delivery and Redis durability are
+  still not guaranteed; this is not end-to-end exactly-once execution.
+- Session expiry does not cancel resting orders;
   accounts remain in memory until a deliberate demo reset (1,000-account cap).
 - The market maker now uses its own demo session and serial ticks; its random walk still
   sends real resting quotes and small alternating taker orders to the engine. Demo
   self-matching is permitted and labelled here; all fills use actual matching/settlement.
-  It has finite virtual funds and no automatic refill.
-- Maker database updates are additive; cancellations are not yet recorded as cancelled in SQL.
+  It budgets quotes against available funds, removes unfilled taker remainders and tries
+  to cancel its resting orders on graceful shutdown. It has finite virtual funds and
+  no automatic refill or automatic session replacement. Uncertain requests reuse their
+  idempotency key; exhausted retries stop the simulator.
+- `SIMULATOR_SEED` reproduces quote decisions from the same initial state; concurrent
+  external activity can change executions. `SIMULATOR_TICKS` limits a run (0 means until
+  stopped). The simulator is not a source of real Solana market prices.
 - There is no coordinated engine/database restore: avoid mixing a fresh engine with old
-  history in a shared demo. Legacy snapshots are incompatible with version 2.
+  history in a shared demo. A persistent `historyId` separates fresh demo histories;
+  snapshot restore keeps it. Restoring an old snapshot against newer SQL data is still
+  unsupported. Legacy snapshots are incompatible with version 2.
 - The default market is SOL_INR. Legacy seeded users 1, 2 and 5 are internal only;
   browser sessions always receive new server-generated account IDs.
 
@@ -365,3 +391,40 @@ The demo market is `SOL_INR` with 100 virtual SOL per new account. Prices are si
 Landing-page scrolling uses [Lenis](https://github.com/darkroomengineering/lenis), driven by the GSAP ticker. Pausing motion or enabling reduced motion restores native scrolling. The terminal also uses Lenis for page scrolling; chart, trade-tape and order-table interactions retain native scrolling. Reduced motion restores native page scrolling.
 
 The landing journey uses a lazy-loaded Three.js particle galaxy and GSAP ScrollTrigger to move the camera through three chapters. Desktop cursor movement adds subtle parallax. Rendering is capped at 30 FPS with a 1.5 pixel-ratio limit and fewer galaxy particles on mobile; drawing stops offscreen or in hidden tabs. Pause/reduced motion uses a static, readable layout; unavailable WebGL retains canvas artwork. The optional Three.js chunk is about 192 KB gzipped and is never loaded by the trading terminal.
+
+### Saved history and worker recovery
+
+The terminal's **History** tab shows only the authenticated account's orders and trades.
+It polls saved records and labels their asynchronous nature; balances and open orders
+continue to come directly from the engine. Failed history reads can be retried without
+blocking trading. History pagination is a live view, not a frozen export.
+
+The worker runs additive, repeatable migrations on startup. When upgrading, stop old
+engine/worker processes and rebuild the worker image before restarting the stack:
+
+```bash
+sudo docker compose -f docker/docker-compose.yml build db-processor
+```
+
+Use the same project/Compose overrides as your existing stack when restarting; do not
+start a second stack. Old rows without ownership remain unassigned, never attributed
+to a guessed account. Legacy queue messages lack safe replay metadata and are retained
+as failures for inspection; start new demonstrations with the upgraded engine.
+
+`TRADE_RETENTION_DAYS=7` accepts 1–30 days. Raw trades and the legacy aggregate have
+Timescale retention policies; terminal orders and deduplication records are pruned
+by the worker every minute. Open orders are retained. Chunk-based trade retention is
+approximate, not deletion at an exact age. Events older than the retention window are
+ignored on replay so they cannot recreate expired history. The current API candle
+windows remain bounded independently of the retention setting.
+
+After inspecting a failed event and fixing its cause, replay up to 50 records using
+the same Redis configuration as the worker (run from `db-processor`):
+
+```bash
+npm run replay:failed -- 50
+```
+
+Replay retains original event IDs. Do not run an old worker alongside the upgraded
+one. Integration tests use disposable resources, verify rollback/replay and kill a
+worker after its queue claim; they never invoke Docker themselves.

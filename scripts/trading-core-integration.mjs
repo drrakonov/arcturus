@@ -1,6 +1,7 @@
 // Runs host services against user-managed local Redis/PostgreSQL; never invokes Docker.
 // Creates and removes its own PostgreSQL database; requires an unused Redis DB 15.
 import assert from 'node:assert/strict';
+import { verifyHistory } from './history-integration.mjs';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -69,8 +70,17 @@ try {
   await admin.query(`CREATE DATABASE ${db}`); created = true;
   pool = new Pool({ ...pgConfig, database: db });
   await pool.query('CREATE EXTENSION IF NOT EXISTS timescaledb');
+  // Exercise an additive upgrade from the original table layout, not just an empty schema.
+  await pool.query(`CREATE TABLE orders(order_id TEXT PRIMARY KEY,market TEXT,price NUMERIC,quantity NUMERIC,
+    executed_qty NUMERIC DEFAULT 0,side TEXT,created_at TIMESTAMPTZ DEFAULT NOW());
+    INSERT INTO orders(order_id,market,price,quantity,side) VALUES ('legacy-fixture','SOL_INR',10,1,'buy');
+    CREATE TABLE trades(id TEXT NOT NULL,market TEXT NOT NULL,price NUMERIC NOT NULL,quantity NUMERIC NOT NULL,
+    quote_qty NUMERIC NOT NULL,is_buyer_maker BOOLEAN NOT NULL,timestamp TIMESTAMPTZ NOT NULL,PRIMARY KEY(id,timestamp));`);
   launch('db-processor');
   await until(() => logs.includes('Waiting for messages'), 'worker migrations');
+  const legacy = (await pool.query("SELECT user_id,status FROM orders WHERE order_id='legacy-fixture'")).rows[0];
+  assert.deepEqual(legacy,{user_id:null,status:null},'migration must not invent legacy ownership/status');
+  await pool.query("DELETE FROM orders WHERE order_id='legacy-fixture'");
   launch('engine'); launch('api', apiPort); launch('ws', wsPort);
   await until(async () => {
     try { return (await fetch(`http://127.0.0.1:${apiPort}/`, { signal: AbortSignal.timeout(300) })).ok &&
@@ -153,13 +163,18 @@ try {
     await writeFile(join(dir, 'services.log'), logs);
     assert.equal(browserExit, 0, 'browser tests');
   }
+  await verifyHistory({ pool, redis, request, session, launch, children, until });
   const maker = launch('market-maker');
   await until(async () => {
     const { payload } = await request('/api/v1/market?symbol=SOL_INR');
     return payload.bids.length > 0 && payload.asks.length > 0 &&
       payload.trades.some(t => Number(t.price) > 900) && payload.candles['5s'].length > 0;
   }, 'simulator supplies real quotes, fills and candles');
+  const makerStopped = new Promise(resolve => maker.once('exit', resolve));
   maker.kill('SIGTERM');
+  await makerStopped;
+  assert.equal(maker.exitCode, 0, 'simulator graceful cleanup');
+  children.splice(children.indexOf(maker),1);
   // A stopped consumer must produce a bounded HTTP error, not an indefinitely hanging request.
   children.find(c => c.spawnargs.includes(join(root, 'engine', 'dist/index.js'))).kill('SIGTERM');
   await delay(400);
@@ -182,7 +197,7 @@ finally {
   if (redis.isOpen) {
     if (ownsRedis) {
       const keys = await redis.keys('demo:session:*');
-      await redis.del(['message', 'db_processor', ...keys]);
+      await redis.del(['message', 'db_processor', 'db_processor:processing', 'db_processor:failed', ...keys]);
     }
     await redis.quit();
   }

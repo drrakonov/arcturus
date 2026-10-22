@@ -29,7 +29,7 @@ export interface RecentTrade { id: string; price: string; quantity: string; isBu
 export type CandleInterval = '5s' | '1m';
 export interface Candle { time: number; open: string; high: string; low: string; close: string; volume: string }
 export interface MarketSnapshot {
-    market: string; generation: string; revision: number;
+    market: string; generation: string; historyId: string; revision: number;
     bids: [string, string][]; asks: [string, string][]; trades: RecentTrade[];
     candles: Record<CandleInterval, Candle[]>;
     candleHistory: boolean;
@@ -210,4 +210,21 @@ export type OrderUpdateData = OrderUpdateDataFull | OrderUpdateDataPartial;
 // ---------- Discriminated union of all DB messages ----------
 export type DbMessage =
     | { type: typeof TRADE_ADDED; data: TradeAddedData }
-    | { type: typeof ORDER_UPDATE; data: OrderUpdateData };
+    | { type: typeof ORDER_UPDATE; data: OrderUpdateData }
+    | PersistenceBatch;
+
+// One committed engine command becomes one database transaction. Quantities are exact strings.
+export interface HistoryOrder {
+    orderId: string; userId: string; market: string; side: 'buy' | 'sell';
+    price: string; quantity: string; executedQty: string;
+    status: 'open' | 'partially_filled' | 'filled' | 'cancelled';
+    createdAt: number; updatedAt: number;
+}
+export interface HistoryTrade extends TradeAddedData {
+    sequence: number; buyerId: string; sellerId: string; makerOrderId: string; takerOrderId: string;
+}
+export interface PersistenceBatch {
+    type: 'PERSISTENCE_BATCH'; version: 1; eventId: string; historyId: string;
+    revision: number; timestamp: number; orders: HistoryOrder[]; trades: HistoryTrade[];
+}
+export interface HistoryPage<T> { rows: T[]; nextCursor: string | null }

@@ -4,6 +4,7 @@ export type { Order } from '@arcturus/contracts';
 
 // Prices in cents, quantities in 1/10,000 units. Wire numbers are display-only.
 export interface BookOrder {
+    createdAt?: number;
     price: bigint;
     quantity: bigint;
     filled: bigint;

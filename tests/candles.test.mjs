@@ -52,3 +52,19 @@ test('late history backfills candles without rolling back live updates; new gene
   const reset = { ...history, generation: 'b', candles: { '5s': [], '1m': [] } };
   assert.deepEqual(mergeMarket(result, reset), reset);
 });
+
+test('persisted candles backfill older bars without replacing live OHLC or double counting volume', async () => {
+  const { mergeCandles } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+  const candle = (time, volume) => ({ time, open:'10', high:'11', low:'9', close:'10', volume });
+  const rows = mergeCandles([candle(0,'1'),candle(5,'1')],[candle(5,'2'),candle(10,'1')]);
+  assert.deepEqual(rows.map(c=>[c.time,c.volume]),[[0,'1'],[5,'2'],[10,'1']]);
+  assert.equal(mergeCandles(rows,rows).length,3);
+  assert.equal(mergeCandles(rows,[],2)[0].time,5);
+});
+
+test('reconnecting history repairs incomplete old bars without letting delayed SQL shrink observed volume', async () => {
+  const { backfillCandles } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+  const c = (time, volume) => ({time,open:'10',high:'10',low:'10',close:'10',volume});
+  const rows = backfillCandles([c(0,'1'),c(5,'3')],[c(0,'2'),c(5,'2'),c(10,'1')]);
+  assert.deepEqual(rows.map(c=>c.volume),['2','3','1']);
+});
