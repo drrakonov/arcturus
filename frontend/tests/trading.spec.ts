@@ -59,6 +59,7 @@ test('two real traders: private orders, execution, balances, cancellation, recon
   await expect(seller.getByRole('button', { name: 'Cancel', exact: true })).toHaveCount(0);
   await expect(buyer.locator('.book-row.sell')).toHaveCount(0, { timeout: 5000 });
   // Close a real WebSocket, then change the book during the reconnect interval.
+  const restoredHistory = buyer.waitForResponse(r => r.url().includes('/api/v1/klines?') && r.ok());
   buyerSocket!.close({ code: 1012, reason: 'Test connection interruption' });
   await expect(buyer.getByText('Reconnecting', { exact: true })).toBeVisible({ timeout: 5000 });
   await expect(buyer.getByRole('button', { name: 'Buy SOL', exact: true })).toBeDisabled();
@@ -69,6 +70,7 @@ test('two real traders: private orders, execution, balances, cancellation, recon
 
   await expect(buyer.getByText('Live connection', { exact: true })).toBeVisible({ timeout: 15000 });
   await expect(buyer.locator('.book-row.sell')).toContainText('12.00');
+  await restoredHistory;
   // Lose only the response AFTER the real API has executed the request.
   let lost = false;
   await buyer.route('**/api/v1/order', async route => {

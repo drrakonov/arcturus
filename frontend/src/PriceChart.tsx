@@ -1,10 +1,11 @@
+import { useCandleHistory } from './useCandleHistory';
 import { useEffect, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries, ColorType, CrosshairMode } from 'lightweight-charts';
 import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts';
 import { Expand, Radio } from 'lucide-react';
 import type { Candle, CandleInterval, MarketSnapshot } from '../../packages/contracts/src/index';
 
-export function PriceChart({ market }: { market: MarketSnapshot | null }) {
+export function PriceChart({ market, connected }: { market: MarketSnapshot | null; connected: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const priceSeries = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -12,7 +13,8 @@ export function PriceChart({ market }: { market: MarketSnapshot | null }) {
   const viewKey = useRef('');
   const [interval, setInterval] = useState<CandleInterval>('5s');
   const [hover, setHover] = useState<{ open: number; high: number; low: number; close: number } | null>(null);
-  const rows = market?.candles?.[interval] ?? [];
+  const history = useCandleHistory(market, interval, connected);
+  const rows = history.rows;
   const latest = rows.at(-1);
   const values = hover ?? (latest ? Object.fromEntries(['open', 'high', 'low', 'close'].map(k => [k, Number(latest[k as keyof Candle])])) : null);
 
@@ -51,6 +53,7 @@ export function PriceChart({ market }: { market: MarketSnapshot | null }) {
     <div className="ohlc">{(['open', 'high', 'low', 'close'] as const).map(key => <span key={key}>{key[0].toUpperCase()} <b className={values && values.close >= values.open ? 'buy-text' : 'sell-text'}>{values ? values[key].toFixed(2) : '—'}</b></span>)}<span className="chart-count" data-testid="candle-count">{rows.length} candles</span></div>
     <div className="chart-canvas" data-native-scroll ref={host} aria-label={`${interval} candlestick chart with execution volume`}/>
     {!rows.length && <div className="chart-wait"><Radio size={24}/><strong>Listening for executions</strong><span>Candles form when orders match. No synthetic history.</span></div>}
-    <div className="chart-caption"><span><i className="live-dot"/> Engine executions · {interval} candles · UTC</span><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView ↗</a></div>
+    {history.error && <div className="history-error" role="status">{history.error} <button onClick={history.retry} disabled={history.loading}>Retry history</button></div>}
+    <div className="chart-caption"><span><i className="live-dot"/> {history.loading ? 'Loading saved history…' : 'Engine executions'} · {interval} candles · UTC</span><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView ↗</a></div>
   </div>;
 }

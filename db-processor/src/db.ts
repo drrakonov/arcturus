@@ -1,5 +1,12 @@
 import pg from "pg";
 
+
+export function retentionDays() {
+    const value = process.env.TRADE_RETENTION_DAYS ?? '7';
+    if (!/^[0-9]+$/.test(value) || +value < 1 || +value > 30) throw new Error('TRADE_RETENTION_DAYS must be 1–30');
+    return +value;
+}
+
 const { Pool } = pg;
 
 let pool: InstanceType<typeof Pool> | null = null;
@@ -12,6 +19,7 @@ let pool: InstanceType<typeof Pool> | null = null;
 export function getPool(): InstanceType<typeof Pool> {
     if (!pool) {
         pool = new Pool({
+            max: 4, connectionTimeoutMillis: 3000, statement_timeout: 10000,
             host: process.env.POSTGRES_HOST ?? "localhost",
             port: Number(process.env.POSTGRES_PORT ?? 5432),
             database: process.env.POSTGRES_DB ?? "my_database",
@@ -39,6 +47,7 @@ export async function closePool(): Promise<void> {
 
 
 export async function runMigrations(): Promise<void> {
+    const days = retentionDays();
     const client = await getPool().connect();
     try {
         // ── Pass 1: plain table DDL inside a transaction ──────────────────────────
@@ -67,6 +76,27 @@ export async function runMigrations(): Promise<void> {
                 side         TEXT,
                 created_at   TIMESTAMPTZ DEFAULT NOW()
             );
+        `);
+
+        await client.query(`
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS user_id TEXT;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS history_id TEXT;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT -1;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS history_id TEXT;
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS sequence BIGINT;
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS buyer_id TEXT;
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS seller_id TEXT;
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS maker_order_id TEXT;
+            ALTER TABLE trades ADD COLUMN IF NOT EXISTS taker_order_id TEXT;
+            CREATE TABLE IF NOT EXISTS processed_events(event_id TEXT PRIMARY KEY, occurred_at TIMESTAMPTZ NOT NULL);
+            CREATE INDEX IF NOT EXISTS processed_events_age ON processed_events(occurred_at);
+            CREATE INDEX IF NOT EXISTS orders_owner_history ON orders(user_id, updated_at DESC, order_id DESC);
+            CREATE INDEX IF NOT EXISTS orders_retention ON orders(updated_at);
+            CREATE INDEX IF NOT EXISTS trades_history_time ON trades(history_id, market, timestamp DESC, sequence DESC);
+            CREATE INDEX IF NOT EXISTS trades_buyer_time ON trades(buyer_id, timestamp DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS trades_seller_time ON trades(seller_id, timestamp DESC, id DESC);
         `);
 
         await client.query("COMMIT");
@@ -100,22 +130,13 @@ export async function runMigrations(): Promise<void> {
             WITH NO DATA;
         `);
 
-        // Automatic refresh policy — if_not_exists => TRUE makes this a no-op on re-run
-        await client.query(`
-            SELECT add_continuous_aggregate_policy(
-                'klines_1m',
-                start_offset      => INTERVAL '1 hour',
-                end_offset        => INTERVAL '1 minute',
-                schedule_interval => INTERVAL '1 minute',
-                if_not_exists     => TRUE
-            );
-        `);
+        // Cover delayed/replayed fills within the retained window, including recent bars.
+        await client.query("SELECT remove_continuous_aggregate_policy('klines_1m', if_exists => TRUE)");
+        await client.query(`SELECT add_continuous_aggregate_policy('klines_1m',
+            start_offset => $1::interval, end_offset => INTERVAL '1 minute',
+            schedule_interval => INTERVAL '1 minute')`, [`${days} days`]);
 
-        // ── Compression ───────────────────────────────────────────────────────────
-        // Compress chunks of the trades hypertable that are older than 1 hour.
-        // TimescaleDB columnar compression reduces raw trade data by ~90%.
-        // The market maker generates ~27k trades/day uncompressed; compressed
-        // that drops to ~2-3k equivalent rows of storage.
+        // Compression is a storage policy, not a measured savings claim.
         await client.query(`
             ALTER TABLE trades SET (
                 timescaledb.compress,
@@ -132,27 +153,15 @@ export async function runMigrations(): Promise<void> {
             );
         `);
 
-        // ── Retention policy ──────────────────────────────────────────────────────
-        // Drop raw trade chunks older than TRADE_RETENTION_DAYS (default: 7 days).
-        // klines_1m is a continuous aggregate — it is NOT affected by this policy.
-        // Historical OHLCV data in klines_1m is preserved indefinitely (it's tiny).
-        // Only the raw per-trade rows are dropped, which is all the market maker
-        // generates in bulk.
-        const retentionDays = parseInt(process.env.TRADE_RETENTION_DAYS ?? "7", 10);
-        await client.query(`
-            SELECT add_retention_policy(
-                'trades',
-                INTERVAL '${retentionDays} days',
-                if_not_exists => TRUE
-            );
-        `);
-
-        console.log(`[db] Migrations complete. Retention: ${retentionDays}d, Compression: after 1h.`);
+        // Replace policies so changing the validated setting takes effect on restart.
+        await client.query("SELECT remove_retention_policy('trades', if_exists => TRUE)");
+        await client.query("SELECT add_retention_policy('trades', $1::interval)", [`${days} days`]);
+        await client.query("SELECT remove_retention_policy('klines_1m', if_exists => TRUE)");
+        await client.query("SELECT add_retention_policy('klines_1m', $1::interval)", [`${days} days`]);
+        await client.query("SELECT set_chunk_time_interval('trades', INTERVAL '1 day')");
+        console.log(`[db] Migrations complete. Retention: ${days}d, Compression: after 1h.`);
     } catch (err) {
-        // Attempt rollback only if we're still inside a transaction
-        try { await client.query("ROLLBACK"); } catch (_) { /* already committed or not started */ }
+        try { await client.query("ROLLBACK"); } catch { /* DDL may already be committed. */ }
         throw err;
-    } finally {
-        client.release();
-    }
+    } finally { client.release(); }
 }

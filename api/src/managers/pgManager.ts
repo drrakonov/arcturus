@@ -11,6 +11,7 @@ let pool: InstanceType<typeof Pool> | null = null;
 export function getPgPool(): InstanceType<typeof Pool> {
     if (!pool) {
         pool = new Pool({
+            max: 4, connectionTimeoutMillis: 3000, statement_timeout: 5000,
             host:     process.env.POSTGRES_HOST     ?? "localhost",
             port:     Number(process.env.POSTGRES_PORT ?? 5432),
             database: process.env.POSTGRES_DB       ?? "my_database",

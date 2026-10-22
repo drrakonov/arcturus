@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ArrowUpRight, Activity } from 'lucide-react';
 import { Tabs } from './components/Tabs';
+import { History } from './History';
 import { PriceChart } from './PriceChart';
 import type { FormEvent } from 'react';
 import { useTerminal } from './useTerminal';
@@ -18,7 +19,7 @@ export default function Terminal() {
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [price, setPrice] = useState('1000');
   const [quantity, setQuantity] = useState('1');
-  const [tab, setTab] = useState<'orders' | 'balances'>('orders');
+  const [tab, setTab] = useState<'orders' | 'balances' | 'history'>('orders');
   const bids = t.market?.bids ?? [], asks = t.market?.asks ?? [], trades = t.market?.trades ?? [];
   const last = trades[0];
   const spread = bids.length && asks.length ? Number(asks[0][0]) - Number(bids[0][0]) : undefined;
@@ -59,7 +60,7 @@ export default function Terminal() {
           <div className="book-foot">Select a price to fill your order ticket <span>↗</span></div>
         </section>
         <section className="panel activity"><div className="panel-heading"><Tabs label="Chart view" tabs={[{ title: "Price chart", value: "price" }, { title: "Depth", value: "depth" }]} value={chartTab} onChange={setChartTab}/><span className="subtle">LIVE EXECUTION FEED</span></div>
-          {chartTab === 'price' ? <PriceChart market={t.market}/> : <DepthChart bids={bids} asks={asks}/>}
+          {chartTab === 'price' ? <PriceChart market={t.market} connected={t.status === 'live'}/> : <DepthChart bids={bids} asks={asks}/>}
           <div className="panel-heading trade-heading"><h2>Recent trades</h2><span className="subtle">Latest {trades.length} executions</span></div>
           <div className="trade-labels"><span>Price (INR)</span><span>Amount (SOL)</span><span>Time</span></div>
           <div className="trade-list" data-native-scroll>{trades.length ? trades.slice(0, 9).map(trade => <div className="trade-row" key={trade.id}><span className={trade.isBuyerMaker ? 'sell-text' : 'buy-text'}>{fmt(trade.price)}</span><span>{fmt(trade.quantity, 4)}</span><time>{new Date(trade.timestamp).toLocaleTimeString('en-GB')}</time></div>) : <div className="empty"><span className="empty-icon">↔</span><strong>No executions yet</strong><p>Trades appear when buy and sell orders match.<br/>Every execution here comes from the live market.</p></div>}</div>
@@ -75,8 +76,8 @@ export default function Terminal() {
           </form><div className="funds-note"><span>◇</span><div><strong>Practice account</strong><p>Your account starts with ₹1,00,000 and 100 SOL. No deposits. No real money.</p></div></div>
         </section>
       </div>
-      <section className="panel account"><div className="account-heading"><Tabs label="Account view" tabs={[{ title: `Open orders ${t.account?.openOrders.length ?? 0}`, value: "orders" }, { title: "Balances", value: "balances" }]} value={tab} onChange={setTab}/><span className="account-id">DEMO ACCOUNT · {t.session?.userId.slice(0, 8) || 'CONNECTING'}</span></div>
-        {tab === 'orders' ? <div className="table-scroll" data-native-scroll><table><thead><tr><th>Market</th><th>Side</th><th>Limit price</th><th>Amount</th><th>Filled</th><th>Remaining</th><th/></tr></thead><tbody>{t.account?.openOrders.map(order => <tr key={order.orderId}><td>{order.market.replace('_', ' / ')}</td><td className={`${order.side}-text`}>{order.side.toUpperCase()}</td><td>₹{fmt(order.price)}</td><td>{fmt(order.quantity, 4)}</td><td>{fmt(order.filled, 4)}</td><td>{fmt(order.quantity - order.filled, 4)}</td><td><button className="cancel" disabled={disabled} onClick={() => t.mutate('DELETE', { market: order.market, orderId: order.orderId }, `cancel ${order.orderId}`)}>{t.busy && t.pending?.label === `cancel ${order.orderId}` ? 'Cancelling…' : 'Cancel'}</button></td></tr>)}</tbody></table>{!t.account?.openOrders.length && <div className="empty compact"><strong>{t.account ? 'No open orders' : 'Loading your account…'}</strong><p>{t.account ? 'Place a limit order above. Unfilled orders will appear here.' : 'Connecting to your virtual balances and open orders.'}</p></div>}</div> : <div className="balance-grid">{Object.entries(balance ?? {}).map(([symbol, b]) => <div className="balance-card" key={symbol}><div className="asset-symbol">{symbol === 'SOL' && <img src="/solana.svg" alt="" width="22" height="18"/>}{symbol}</div><span>Available<strong data-testid={`balance-${symbol}`}>{fmt(b.available, symbol === 'INR' ? 2 : 4)}</strong></span><span>In orders<strong>{fmt(b.locked, symbol === 'INR' ? 2 : 4)}</strong></span></div>)}</div>}
+      <section className="panel account"><div className="account-heading"><Tabs label="Account view" tabs={[{ title: `Open orders ${t.account?.openOrders.length ?? 0}`, value: "orders" }, { title: "Balances", value: "balances" }, { title: "History", value: "history" }]} value={tab} onChange={setTab}/><span className="account-id">DEMO ACCOUNT · {t.session?.userId.slice(0, 8) || 'CONNECTING'}</span></div>
+        {tab === 'history' ? <History key={t.session?.token} token={t.session?.token} revision={t.account?.revision}/> : tab === 'orders' ? <div className="table-scroll" data-native-scroll><table><thead><tr><th>Market</th><th>Side</th><th>Limit price</th><th>Amount</th><th>Filled</th><th>Remaining</th><th/></tr></thead><tbody>{t.account?.openOrders.map(order => <tr key={order.orderId}><td>{order.market.replace('_', ' / ')}</td><td className={`${order.side}-text`}>{order.side.toUpperCase()}</td><td>₹{fmt(order.price)}</td><td>{fmt(order.quantity, 4)}</td><td>{fmt(order.filled, 4)}</td><td>{fmt(order.quantity - order.filled, 4)}</td><td><button className="cancel" disabled={disabled} onClick={() => t.mutate('DELETE', { market: order.market, orderId: order.orderId }, `cancel ${order.orderId}`)}>{t.busy && t.pending?.label === `cancel ${order.orderId}` ? 'Cancelling…' : 'Cancel'}</button></td></tr>)}</tbody></table>{!t.account?.openOrders.length && <div className="empty compact"><strong>{t.account ? 'No open orders' : 'Loading your account…'}</strong><p>{t.account ? 'Place a limit order above. Unfilled orders will appear here.' : 'Connecting to your virtual balances and open orders.'}</p></div>}</div> : <div className="balance-grid">{Object.entries(balance ?? {}).map(([symbol, b]) => <div className="balance-card" key={symbol}><div className="asset-symbol">{symbol === 'SOL' && <img src="/solana.svg" alt="" width="22" height="18"/>}{symbol}</div><span>Available<strong data-testid={`balance-${symbol}`}>{fmt(b.available, symbol === 'INR' ? 2 : 4)}</strong></span><span>In orders<strong>{fmt(b.locked, symbol === 'INR' ? 2 : 4)}</strong></span></div>)}</div>}
       </section><div className="notice" role="status" aria-live="polite">{t.notice || 'Orders and balances are private to this demo account.'}</div>
     </main><footer><span>✦ ARCTURUS <span className="subtle">Exchange demo</span></span><span>Simulated assets only <i/> No real-money trading</span></footer>
   </div>;

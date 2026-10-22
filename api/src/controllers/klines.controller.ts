@@ -1,66 +1,30 @@
-import type { Request, Response } from "express";
-import { getPgPool } from "../managers/pgManager.js";
+import type { Request, Response } from 'express';
+import { TradingError } from '@arcturus/contracts';
+import { getPgPool } from '../managers/pgManager.js';
+import { commandError } from './engine-response.js';
+import { queryHistoryId, queryInteger, queryMarket } from './history-query.js';
 
-export const getKlines = async (req: Request, res: Response) => {
+export async function getKlines(req: Request, res: Response) {
     try {
-        const { symbol, interval, startTime, endTime, limit } = req.query;
-
-        if (!symbol) {
-            return res.status(400).json({ success: false, message: "symbol is required" });
-        }
-
-        // Only 1m is supported right now (klines_1m is the only aggregate)
-        if (interval && interval !== "1m") {
-            return res.status(400).json({ success: false, message: "Only interval=1m is supported" });
-        }
-
-        const rowLimit = Math.min(parseInt((limit as string) ?? "500", 10), 1000);
-
-        const conditions: string[] = ["market = $1"];
-        const values: (string | number)[] = [symbol as string];
-        let idx = 2;
-
-        if (startTime) {
-            conditions.push(`bucket >= to_timestamp($${idx} / 1000.0)`);
-            values.push(Number(startTime));
-            idx++;
-        }
-        if (endTime) {
-            conditions.push(`bucket <= to_timestamp($${idx} / 1000.0)`);
-            values.push(Number(endTime));
-            idx++;
-        }
-
-        const sql = `
-            SELECT
-                extract(epoch FROM bucket) * 1000  AS timestamp,
-                open,
-                high,
-                low,
-                close,
-                volume
-            FROM klines_1m
-            WHERE ${conditions.join(" AND ")}
-            ORDER BY bucket ASC
-            LIMIT $${idx}
-        `;
-        values.push(rowLimit);
-
-        const { rows } = await getPgPool().query(sql, values);
-
-        return res.status(200).json({
-            success: true,
-            payload: rows.map((r) => ({
-                timestamp: Number(r.timestamp),
-                open:      r.open,
-                high:      r.high,
-                low:       r.low,
-                close:     r.close,
-                volume:    r.volume,
-            })),
-        });
-    } catch (err) {
-        console.error("Failed to get the klines", err);
-        return res.status(500).json({ success: false, message: "Failed to get the klines" });
-    }
-};
+        const market = queryMarket(req.query.symbol), historyId = queryHistoryId(req.query.historyId);
+        const interval = req.query.interval ?? '1m';
+        if (interval !== '1m' && interval !== '5s') throw new TradingError('INVALID_REQUEST', 'Use interval=5s or 1m');
+        const limit = queryInteger(req.query.limit, 180, 1, 500), now = Date.now();
+        const end = queryInteger(req.query.endTime, now, 0, now);
+        const window = (interval === '5s' ? 1 : 7) * 86400_000;
+        const start = queryInteger(req.query.startTime, Math.max(0, end - window), 0, end);
+        if (end - start > window) throw new TradingError('INVALID_REQUEST', 'Candle query exceeds supported window');
+        // Raw fills include the current bucket and delayed arrivals; no refresh-policy lag.
+        // Sequence breaks ties when multiple fills share a millisecond.
+        const { rows } = await getPgPool().query(`SELECT extract(epoch FROM bucket) AS time, open,high,low,close,volume FROM (
+            SELECT time_bucket($1::interval,timestamp) AS bucket,
+                (array_agg(price ORDER BY timestamp,sequence,id))[1] AS open,
+                max(price) AS high,min(price) AS low,
+                (array_agg(price ORDER BY timestamp DESC,sequence DESC,id DESC))[1] AS close,sum(quantity) AS volume
+            FROM trades WHERE history_id=$2 AND market=$3 AND timestamp>=to_timestamp($4/1000.0)
+                AND timestamp<=to_timestamp($5/1000.0)
+            GROUP BY bucket ORDER BY bucket DESC LIMIT $6
+        ) candles ORDER BY bucket`, [interval === '5s' ? '5 seconds' : '1 minute',historyId,market,start,end,limit]);
+        return res.json({ success: true, payload: rows.map(r => ({ ...r, time: Number(r.time), timestamp: Number(r.time)*1000 })) });
+    } catch (error) { return commandError(res, error); }
+}

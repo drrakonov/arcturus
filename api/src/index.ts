@@ -10,6 +10,7 @@ import tickersRouter from './routes/tickers.routes.js';
 import { createSession, requireSession, getAccount, getMarket } from './controllers/session.controller.js';
 import { RedisManager } from './managers/redisManager.js';
 
+import { getAccountTrades } from './controllers/history.controller.js';
 const app = express();
 app.use(cors({
     origin: process.env.CORS_ORIGIN || "http://localhost:5173"
@@ -17,6 +18,7 @@ app.use(cors({
 app.use(express.json());
 
 app.post('/api/v1/session', createSession);
+app.get('/api/v1/account/trades', requireSession, getAccountTrades);
 app.get('/api/v1/account', requireSession, getAccount);
 app.get('/api/v1/market', getMarket);
 app.use("/api/v1/order", requireSession, orderRouter);

@@ -1,4 +1,6 @@
 import type { Request, Response } from "express";
+import { queryInteger, queryMarket } from './history-query.js';
+import { commandError } from './engine-response.js';
 import { getPgPool } from "../managers/pgManager.js";
 
 
@@ -6,11 +8,8 @@ export const getTrades = async (req: Request, res: Response) => {
     try {
         const { symbol, limit } = req.query;
 
-        if (!symbol) {
-            return res.status(400).json({ success: false, message: "symbol is required" });
-        }
-
-        const rowLimit = Math.min(parseInt((limit as string) ?? "50", 10), 100);
+        const market = queryMarket(symbol);
+        const rowLimit = queryInteger(limit, 50, 1, 100);
 
         const sql = `
             SELECT
@@ -22,11 +21,11 @@ export const getTrades = async (req: Request, res: Response) => {
                 extract(epoch FROM timestamp) * 1000 AS timestamp
             FROM trades
             WHERE market = $1
-            ORDER BY timestamp DESC
+            ORDER BY timestamp DESC, sequence DESC, id DESC
             LIMIT $2
         `;
 
-        const { rows } = await getPgPool().query(sql, [symbol as string, rowLimit]);
+        const { rows } = await getPgPool().query(sql, [market, rowLimit]);
 
         return res.status(200).json({
             success: true,
@@ -40,7 +39,6 @@ export const getTrades = async (req: Request, res: Response) => {
             })),
         });
     } catch (err) {
-        console.error("Failed to get the trades", err);
-        return res.status(500).json({ success: false, message: "Failed to get the trades" });
+        return commandError(res, err);
     }
 };
