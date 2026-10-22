@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const services = ['api', 'engine', 'ws', 'db-processor', 'market-maker'];
-const packages = ['packages/contracts', ...services];
+const packages = ['packages/contracts', ...services, 'frontend'];
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 async function run(directory, args) {

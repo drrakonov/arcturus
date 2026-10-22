@@ -7,7 +7,7 @@ import depthRouter from './routes/depth.routes.js';
 import tradesRouter from './routes/trades.routes.js';
 import klinesRouter from './routes/klines.routes.js';
 import tickersRouter from './routes/tickers.routes.js';
-import marketsRouter from './routes/markets.routes.js';
+import { createSession, requireSession, getAccount, getMarket } from './controllers/session.controller.js';
 import { RedisManager } from './managers/redisManager.js';
 
 const app = express();
@@ -16,12 +16,16 @@ app.use(cors({
 }));
 app.use(express.json());
 
-app.use("/api/v1/order", orderRouter);
+app.post('/api/v1/session', createSession);
+app.get('/api/v1/account', requireSession, getAccount);
+app.get('/api/v1/market', getMarket);
+app.use("/api/v1/order", requireSession, orderRouter);
 app.use("/api/v1/depth", depthRouter);
 app.use("/api/v1/trades", tradesRouter);
 app.use("/api/v1/klines", klinesRouter);
 app.use("/api/v1/tickers", tickersRouter);
-app.use("/api/v1/markets", marketsRouter);
+// Market provisioning is internal; browsers trade the existing demo market.
+app.post('/api/v1/markets', (_req, res) => res.status(403).json({ success: false, code: 'FORBIDDEN', message: 'Market creation is internal' }));
 
 
 

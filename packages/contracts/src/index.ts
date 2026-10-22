@@ -18,7 +18,27 @@ export const CREATE_MARKET = "CREATE_MARKET";
 export const GET_DEPTH = "GET_DEPTH";
 export const GET_OPEN_ORDERS = "GET_OPEN_ORDERS";
 
+export interface AccountSnapshot {
+    userId: string;
+    generation: string;
+    revision: number;
+    balances: Record<string, { available: string; locked: string }>;
+    openOrders: (Order & { market: string })[];
+}
+export interface RecentTrade { id: string; price: string; quantity: string; isBuyerMaker: boolean; timestamp: number }
+export type CandleInterval = '5s' | '1m';
+export interface Candle { time: number; open: string; high: string; low: string; close: string; volume: string }
+export interface MarketSnapshot {
+    market: string; generation: string; revision: number;
+    bids: [string, string][]; asks: [string, string][]; trades: RecentTrade[];
+    candles: Record<CandleInterval, Candle[]>;
+    candleHistory: boolean;
+}
 export type MessageFromApi = {
+    type: 'CREATE_ACCOUNT' | 'GET_ACCOUNT', data: { userId: string }
+} | {
+    type: 'GET_MARKET', data: { market: string }
+} | {
     type: typeof CREATE_ORDER,
     data: {
         market: string,
@@ -31,7 +51,8 @@ export type MessageFromApi = {
     type: typeof CANCEL_ORDER,
     data: {
         orderId: string,
-        market: string
+        market: string,
+        userId: string
     }
 } | {
     type: typeof ON_RAMP,
@@ -58,6 +79,10 @@ export type MessageFromApi = {
     }
 }
 export type MessageToApi = {
+    type: 'ACCOUNT', payload: AccountSnapshot
+} | {
+    type: 'MARKET', payload: MarketSnapshot
+} | {
     type: "ERROR",
     payload: { code: ErrorCode; message: string }
 } | {
@@ -126,7 +151,9 @@ export type TradeAddedMessage = {
     }
 }
 
-export type WsMessage = TickerUpdateMessage | DepthUpdateMessage | TradeAddedMessage;
+export type WsMessage = TickerUpdateMessage | DepthUpdateMessage | TradeAddedMessage |
+    { stream: string; data: { e: 'account'; snapshot: AccountSnapshot } } |
+    { stream: string; data: { e: 'market'; snapshot: MarketSnapshot } };
 
 export const SUBSCRIBE = "SUBSCRIBE";
 export const UNSUBSCRIBE = "UNSUBSCRIBE";

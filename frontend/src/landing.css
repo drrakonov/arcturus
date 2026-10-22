@@ -1,0 +1,111 @@
+.landing { background:#080a0f; color:#ededf0; }
+.skip-link { position:fixed; top:-80px; left:20px; padding:12px; background:#fff; color:#080a0f; z-index:10; }
+.skip-link:focus { top:12px; }
+.cosmos { position:relative; isolation:isolate; min-height:850px; height:100svh; max-height:1200px; overflow:hidden; background:#080a0f; }
+.galaxy-canvas { position:absolute; inset:-7%; width:114%; height:114%; z-index:-3; pointer-events:none; }
+.cosmos-shade { position:absolute; inset:0; z-index:-1; background:linear-gradient(90deg,#080a0fbb 0%,#080a0f38 45%,transparent 75%),linear-gradient(0deg,#080a0f,transparent 25%); pointer-events:none; }
+.landing-header { display:flex; align-items:center; justify-content:space-between; padding:32px 5%; }
+.landing-header .brand { font-size:18px; }
+.landing-header .brand-mark { font-size:36px; color:#f4b38e; }
+.landing-header nav { display:flex; align-items:center; gap:40px; font-size:12px; }
+.landing-header nav>a:first-child { color:#a5a9b4; }
+.nav-trade { display:flex; align-items:center; gap:20px; padding:11px 16px; border:1px solid #ffffff35; border-radius:5px; background:#11131a66; }
+.landing-hero { padding:0 8%; margin-top:clamp(90px,15vh,180px); position:relative; max-width:1100px; }
+.hero-eyebrow { font:10px 'IBM Plex Mono',monospace; letter-spacing:2px; color:#a5a9b4; display:flex; align-items:center; gap:10px; }
+.hero-eyebrow>span { width:5px; height:5px; background:#efb28d; }
+.landing-hero h1 { font-size:clamp(64px,7.5vw,116px); line-height:1.02; font-weight:400; letter-spacing:-6px; margin:30px 0; }
+.landing-hero h1 em { font-family:Georgia,serif; font-weight:400; color:#ebc3ab; }
+.hero-copy { font-size:15px; line-height:1.8; color:#a5a9b4; }
+.hero-actions { display:flex; gap:25px; align-items:center; margin-top:35px; }
+.launch-button { display:flex; align-items:center; gap:38px; padding:17px 22px; background:#ececf0; color:#12151c; border-radius:5px; font-size:13px; font-weight:600; transition:background .2s; }
+.launch-button:hover { background:#efd3bf; }
+.hero-actions>span { color:#989eaa; font-size:10px; line-height:1.7; }
+.galaxy-coordinate { position:absolute; right:14%; top:56%; font:10px 'IBM Plex Mono',monospace; letter-spacing:3px; color:#ddd4cc; }
+.coordinate-cross { font-size:24px; position:absolute; left:-35px; top:-8px; color:#e3ad87; }
+.galaxy-coordinate small { font-size:7px; letter-spacing:1.3px; color:#838a99; margin-top:7px; }
+.cosmos-bottom { position:absolute; bottom:30px; left:5%; right:5%; display:flex; align-items:center; justify-content:space-between; border-top:1px solid #ffffff20; padding-top:23px; font:9px 'IBM Plex Mono',monospace; color:#8c929f; }
+.cosmos-bottom a,.cosmos-bottom button { display:flex; align-items:center; gap:12px; font-size:10px; }
+.cosmos-bottom a:hover,.cosmos-bottom button:hover { color:#fff; }
+.experience { padding:100px 8% 80px; display:grid; grid-template-columns:1fr 1fr; gap:60px; border-top:1px solid #1e232c; }
+.section-index { font:9px 'IBM Plex Mono',monospace; letter-spacing:2px; color:#a99484; }
+.experience-heading h2 { font-size:clamp(26px,3vw,43px); font-weight:400; letter-spacing:-1.5px; line-height:1.25; margin:25px 0; }
+.experience-heading h2 span { color:#707886; }
+.experience-heading>p { max-width:330px; color:#8f97a6; font-size:13px; line-height:1.8; }
+.experience-rows>div { display:grid; grid-template-columns:30px 1fr; gap:0 12px; padding:24px 0; border-bottom:1px solid #242831; }
+.experience-rows>div:first-child { padding-top:0; }
+.experience-rows>div>span { color:#777f8e; font:10px 'IBM Plex Mono',monospace; padding-top:4px; }
+.experience-rows h3 { font-size:15px; font-weight:500; margin:0 0 10px; }
+.experience-rows p { grid-column:2; font-size:12px; line-height:1.8; color:#8f97a6; max-width:380px; }
+.experience-link { grid-column:1/-1; border-bottom:1px solid #444b58; padding:20px 0; display:flex; justify-content:space-between; font-size:18px; }
+.landing-footer { padding:32px 5%; margin:0; color:#747d8c; font-size:10px; border-color:#20242d; gap:20px; align-items:center; }
+.landing-footer .brand { font-size:14px; color:#c2c7d1; }
+.page-loading { min-height:100svh; display:grid; place-items:center; font-size:14px; color:#a5a9b4; background:#0c0e12; }
+@media(max-width:700px) {
+ .cosmos { min-height:760px; max-height:950px; }
+ .landing-header { padding:24px 6%; }
+ .landing-header .brand { font-size:14px; gap:6px; }
+ .landing-header .brand-mark { font-size:28px; }
+ .landing-header nav>a:first-child { display:none; }
+ .nav-trade { padding:9px 10px; gap:8px; font-size:10px; }
+ .landing-hero { padding:0 7%; margin-top:135px; }
+ .landing-hero h1 { font-size:67px; letter-spacing:-3.5px; margin:25px 0; }
+ .hero-eyebrow { font-size:8px; letter-spacing:1px; }
+ .hero-copy { font-size:12px; }
+ .hero-actions { gap:14px; }
+ .launch-button { padding:15px; gap:16px; font-size:12px; }
+ .hero-actions>span { font-size:9px; }
+ .galaxy-coordinate { top:19%; right:10%; font-size:8px; }
+ .cosmos-bottom { left:7%; right:7%; }
+ .cosmos-bottom>span { display:none; }
+ .experience { display:block; padding:65px 7%; }
+ .experience-rows { margin-top:45px; }
+ .experience-link { margin-top:35px; font-size:16px; }
+ .landing-footer { flex-wrap:wrap; padding:25px 7%; }
+ .landing-footer>span { order:3; flex-basis:100%; font-size:9px; }
+}
+/* One persistent scene, with the scroll moving the camera through three chapters. */
+.journey { height:340svh; position:relative; }
+.journey .cosmos { position:sticky; top:0; min-height:660px; height:100svh; max-height:none; }
+.galaxy-scene,.galaxy-renderer,.galaxy-fallback { position:absolute; inset:0; width:100%; height:100%; }
+.galaxy-scene { z-index:-3; pointer-events:none; }
+.galaxy-fallback { overflow:hidden; }
+.galaxy-webgl { display:block; width:100%; height:100%; }
+.journey .cosmos-shade { background:linear-gradient(90deg,#080a0fb0,transparent 70%),linear-gradient(0deg,#080a0fcc,transparent 25%); }
+.landing-header { position:relative; z-index:5; }
+.journey-copy { position:absolute; top:30%; left:8%; width:50%; visibility:hidden; opacity:0; }
+.journey-copy h2 { font-size:clamp(54px,6.5vw,100px); line-height:1.05; letter-spacing:-4px; font-weight:400; margin:26px 0; }
+.journey-copy h2 em { font-family:Georgia,serif; font-weight:400; color:#e9bd9e; }
+.journey-copy p { color:#aab2c1; font-size:14px; line-height:1.8; }
+.journey-middle { left:auto; right:8%; width:42%; }
+.journey-middle .orbit-diagram { position:absolute; left:-95%; top:0; width:300px; height:300px; display:grid; place-items:center; }
+.orbit-diagram i { position:absolute; inset:0; border:1px solid #bdcce32e; border-radius:50%; transform:rotate(-35deg) scaleY(.55); }
+.orbit-diagram i:nth-child(2) { inset:30px; transform:rotate(30deg) scaleY(.7); }
+.orbit-diagram i:nth-child(3) { inset:60px; transform:rotate(85deg) scaleY(.6); }
+.orbit-diagram span { color:#e8c5a3; font-size:38px; }
+.journey-arrival .launch-button { width:fit-content; margin-top:32px; }
+.journey-arrival small { color:#8994a7; margin-top:18px; font-size:10px; }
+.journey-progress { width:130px; height:2px; background:#ffffff25; overflow:hidden; }
+.journey-progress i { display:block; width:100%; height:100%; background:#eac1a4; transform:scaleX(0); transform-origin:left; }
+.still-journey .journey { height:auto; }
+.still-journey .cosmos { position:relative; height:auto; min-height:100svh; }
+.still-journey .landing-hero { margin-bottom:100px; }
+.still-journey .journey-copy { position:relative; inset:auto; margin:100px 8%; width:84%; visibility:visible; opacity:1; }
+.still-journey .orbit-diagram,.still-journey .galaxy-coordinate { display:none; }
+.still-journey .cosmos-bottom { position:relative; left:auto; right:auto; bottom:auto; margin:0 5%; padding:24px 0; }
+.still-journey .galaxy-scene { max-height:100svh; }
+.still-journey .journey-progress { display:none; }
+@media(max-width:700px) {
+ .journey { height:280svh; }
+ .journey .cosmos { min-height:650px; }
+ .journey .landing-hero { margin-top:100px; }
+ .journey-copy { width:86%; left:7%; right:auto; top:30%; }
+ .journey-copy h2 { font-size:59px; letter-spacing:-3px; }
+ .journey-copy p { font-size:12px; }
+ .journey-middle .orbit-diagram { display:none; }
+ .journey .cosmos-shade { background:linear-gradient(0deg,#080a0fd9,transparent 90%); }
+ .journey-progress { display:none; }
+}
+.journey-copy { isolation:isolate; }
+.journey-copy::before { content:''; position:absolute; inset:-35px -25px; z-index:-1; pointer-events:none; background:radial-gradient(ellipse at center,#080a0fa6,transparent 72%); }
+.journey-copy p,.journey-copy small { text-shadow:0 1px 6px #000; }
+.still-journey .journey-copy::before { display:none; }

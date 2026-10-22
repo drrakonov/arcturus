@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { TradingError, validateMessage, parseDecimal, formatDecimal } from '@arcturus/contracts';
-import type { DbMessage, MessageToApi, WsMessage } from '@arcturus/contracts';
-import { Orderbook, type BookOrder, type Fill } from './orderbook.js';
+import type { DbMessage, MessageToApi, WsMessage, AccountSnapshot, MarketSnapshot, RecentTrade, Candle, CandleInterval } from '@arcturus/contracts';
+import { Orderbook, toWireOrder, type BookOrder, type Fill } from './orderbook.js';
+
+import { addFill } from './candles.js';
 
 export const BASE_CURRENCY = 'INR';
 type Balance = { available: bigint; locked: bigint };
@@ -27,6 +29,11 @@ const invariant = (ok: boolean, message: string) => {
 export class Engine {
     private orderbooks: Orderbook[] = [];
     private balances: Balances = new Map();
+    private generation = randomUUID();
+    private revision = 0;
+    private recentTrades = new Map<string, RecentTrade[]>();
+    private candles = new Map<string, Record<CandleInterval, Candle[]>>();
+    private requests = new Map<string, { fingerprint: string; expires: number; response: MessageToApi }>();
     private usedTxnIds = new Set<string>();
     private sink: EngineSink;
     private orderId: () => string;
@@ -37,10 +44,10 @@ export class Engine {
         this.now = options.now ?? Date.now;
         if (options.snapshot !== undefined) this.restore(options.snapshot);
         else {
-            this.orderbooks = [new Orderbook('TATA')];
+            this.orderbooks = [new Orderbook('SOL')];
             for (const id of ['1', '2', '5']) this.balances.set(id, {
                 INR: { available: 10_000_000_000_000n, locked: 0n },
-                TATA: { available: 10_000_000_000_000n, locked: 0n },
+                SOL: { available: 10_000_000_000_000n, locked: 0n },
             });
         }
         this.assertState(this.orderbooks, this.balances);
@@ -55,17 +62,39 @@ export class Engine {
     private emit(action: () => void) {
         try { action(); } catch (error) { console.error('Engine event delivery failed after commit', error); }
     }
-    process({ message, clientId }: { message: unknown; clientId: string }): MessageToApi {
+    process({ message, clientId, requestId, expiresAt }: { message: unknown; clientId: string; requestId?: string; expiresAt?: number }): MessageToApi {
         let response: MessageToApi;
+        let cacheKey: string | undefined;
+        let fingerprint = '';
         try {
+            if (expiresAt !== undefined && this.now() > expiresAt) throw new TradingError('REQUEST_TIMEOUT', 'Command expired before execution');
             const command = validateMessage(message);
+            if (requestId && ['CREATE_ORDER', 'CANCEL_ORDER'].includes(command.type)) {
+                if (!/^[A-Za-z0-9-]{8,64}$/.test(requestId)) throw new TradingError('INVALID_REQUEST', 'Invalid request ID');
+                for (const [key, value] of this.requests) if (value.expires <= this.now()) this.requests.delete(key);
+                const key = `${'userId' in command.data ? command.data.userId : ''}:${requestId}`;
+                fingerprint = JSON.stringify(command);
+                const cached = this.requests.get(key);
+                if (cached) {
+                    if (cached.fingerprint !== fingerprint) throw new TradingError('REQUEST_CONFLICT', 'Request ID was already used with different fields');
+                    this.emit(() => this.sink.sendToApi(clientId, cached.response));
+                    return structuredClone(cached.response);
+                }
+                if (this.requests.size >= 10_000) throw new TradingError('LIMIT_EXCEEDED', 'Request cache full; retry later');
+                cacheKey = key;
+            }
             switch (command.type) {
+                case 'CREATE_ACCOUNT':
+                    this.createAccount(command.data.userId);
+                    response = { type: 'ACCOUNT', payload: this.getAccount(command.data.userId) }; break;
+                case 'GET_ACCOUNT': response = { type: 'ACCOUNT', payload: this.getAccount(command.data.userId) }; break;
+                case 'GET_MARKET': response = { type: 'MARKET', payload: this.getMarket(command.data.market) }; break;
                 case 'CREATE_ORDER': {
                     const d = command.data;
                     response = { type: 'ORDER_PLACED', payload: this.createOrder(d.market, d.price, d.quantity, d.side, d.userId) };
                     break;
                 }
-                case 'CANCEL_ORDER': response = { type: 'ORDER_CANCELLED', payload: this.cancelOrder(command.data.market, command.data.orderId) }; break;
+                case 'CANCEL_ORDER': response = { type: 'ORDER_CANCELLED', payload: this.cancelOrder(command.data.market, command.data.orderId, command.data.userId) }; break;
                 case 'GET_DEPTH': response = { type: 'DEPTH', payload: this.book(command.data.market).getDepth() }; break;
                 case 'GET_OPEN_ORDERS':
                     if (!this.balances.has(command.data.userId)) throw new TradingError('UNKNOWN_USER', 'Unknown user');
@@ -84,6 +113,7 @@ export class Engine {
             response = { type: 'ERROR', payload: error instanceof TradingError ?
                 { code: error.code, message: error.message } : { code: 'INTERNAL_ERROR', message: 'Trading command failed' } };
         }
+        if (cacheKey) this.requests.set(cacheKey, { fingerprint, expires: this.now() + 600_000, response: structuredClone(response) });
         this.emit(() => this.sink.sendToApi(clientId, response));
         return response;
     }
@@ -120,15 +150,27 @@ export class Engine {
         this.commit(original, book, balances);
         this.emit(() => this.publishOrder(order, fills, market));
         this.emit(() => this.publishDepth(original, book));
+        this.revision++;
+        const recent = this.recentTrades.get(market) ?? [];
+        const candles = this.candles.get(market) ?? { '5s': [], '1m': [] };
+        for (const fill of fills) {
+            const timestamp = this.now();
+            recent.unshift({ id: String(fill.tradeId), price: formatDecimal(fill.price, 2),
+                quantity: formatDecimal(fill.qty, 4), isBuyerMaker: side === 'sell', timestamp });
+            for (const interval of ['5s', '1m'] as const) addFill(candles[interval], fill.price, fill.qty, timestamp, interval);
+        }
+        this.candles.set(market, candles);
+        this.recentTrades.set(market, recent.slice(0, 50));
+        this.notify(market, [userId, ...fills.map(f => f.otherUserId)]);
         return { orderId: order.orderId, executedQty: numberQty(executedQty),
             fills: fills.map(f => ({ price: formatDecimal(f.price, 2), qty: numberQty(f.qty), tradeId: f.tradeId })) };
     }
-    cancelOrder(market: string, orderId: string) {
-        validateMessage({ type: 'CANCEL_ORDER', data: { market, orderId } });
+    cancelOrder(market: string, orderId: string, userId: string) {
+        validateMessage({ type: 'CANCEL_ORDER', data: { market, orderId, userId } });
         const original = this.book(market);
         const book = original.clone();
         const order = [...book.bids, ...book.asks].find(o => o.orderId === orderId);
-        if (!order) throw new TradingError('ORDER_NOT_FOUND', 'Open order not found');
+        if (!order || order.userId !== userId) throw new TradingError('ORDER_NOT_FOUND', 'Open order not found');
         const balances = cloneBalances(this.balances);
         const remaining = order.quantity - order.filled;
         const funds = asset(balances, order.userId, order.side === 'buy' ? book.quoteAsset : book.baseAsset);
@@ -139,7 +181,36 @@ export class Engine {
         book.asks = book.asks.filter(o => o.orderId !== orderId);
         this.commit(original, book, balances);
         this.emit(() => this.publishDepth(original, book));
+        this.revision++;
+        this.notify(market, [userId]);
         return { orderId, executedQty: numberQty(order.filled), remainingQty: numberQty(remaining) };
+    }
+    private createAccount(userId: string) {
+        if (this.balances.has(userId)) return;
+        if (this.balances.size >= 1000) throw new TradingError('LIMIT_EXCEEDED', 'Demo account capacity reached');
+        this.balances.set(userId, { INR: { available: 100_000_000_000n, locked: 0n }, SOL: { available: 100_000_000n, locked: 0n } });
+        this.revision++;
+    }
+    getAccount(userId: string): AccountSnapshot {
+        const balances = this.balances.get(userId);
+        if (!balances) throw new TradingError('UNKNOWN_USER', 'Demo account unavailable; start a new session');
+        return { userId, generation: this.generation, revision: this.revision,
+            balances: Object.fromEntries(Object.entries(balances).map(([symbol, b]) =>
+                [symbol, { available: formatDecimal(b.available, 6), locked: formatDecimal(b.locked, 6) }])),
+            openOrders: this.orderbooks.flatMap(book => [...book.bids, ...book.asks]
+                .filter(o => o.userId === userId).map(o => ({ ...toWireOrder(o), market: book.ticker() }))) };
+    }
+    getMarket(market: string, history = true): MarketSnapshot {
+        const depth = this.book(market).getDepth();
+        return { market, generation: this.generation, revision: this.revision,
+            bids: depth.bids.slice(0, 20), asks: depth.asks.slice(0, 20), trades: structuredClone(this.recentTrades.get(market) ?? []),
+            candleHistory: history, candles: Object.fromEntries((['5s', '1m'] as const).map(interval =>
+                [interval, structuredClone(history ? this.candles.get(market)?.[interval] ?? [] : this.candles.get(market)?.[interval].slice(-1) ?? [])])) as Record<CandleInterval, Candle[]> };
+    }
+    private notify(market: string, users: string[]) {
+        this.emit(() => this.sink.publishMessage(`market@${market}`, { stream: `market@${market}`, data: { e: 'market', snapshot: this.getMarket(market, false) } }));
+        for (const userId of new Set(users)) this.emit(() => this.sink.publishMessage(`account@${userId}`,
+            { stream: `account@${userId}`, data: { e: 'account', snapshot: this.getAccount(userId) } }));
     }
     private commit(original: Orderbook, book: Orderbook, balances: Balances) {
         const books = this.orderbooks.map(b => b === original ? book : b);
@@ -171,7 +242,7 @@ export class Engine {
                     quantity: formatDecimal(o.quantity, 4), side: o.side, userId: o.userId } });
                 invariant(o.side === side && o.filled >= 0n && o.filled < o.quantity, 'live order quantities/side');
                 invariant(!ids.has(o.orderId), 'duplicate order id'); ids.add(o.orderId);
-                validateMessage({ type: 'CANCEL_ORDER', data: { market: book.ticker(), orderId: o.orderId } });
+                validateMessage({ type: 'CANCEL_ORDER', data: { market: book.ticker(), orderId: o.orderId, userId: o.userId } });
                 invariant(balances.has(o.userId), 'maker account exists');
                 const symbol = side === 'buy' ? book.quoteAsset : book.baseAsset;
                 const amount = (o.quantity - o.filled) * (side === 'buy' ? o.price : 100n);
@@ -239,7 +310,8 @@ export class Engine {
         });
     }
     getSnapshot() {
-        return { version: 2, orderbooks: this.orderbooks.map(b => ({ baseAsset: b.baseAsset,
+        return { version: 2, generation: this.generation, revision: this.revision, requests: [...this.requests],
+            candles: [...this.candles], recentTrades: [...this.recentTrades], orderbooks: this.orderbooks.map(b => ({ baseAsset: b.baseAsset,
             bids: b.bids.map(o => ({ ...o, price: String(o.price), quantity: String(o.quantity), filled: String(o.filled) })),
             asks: b.asks.map(o => ({ ...o, price: String(o.price), quantity: String(o.quantity), filled: String(o.filled) })),
             lastTradeId: b.lastTradeId, currentPrice: String(b.currentPrice) })),
@@ -249,6 +321,14 @@ export class Engine {
     }
     private restore(snapshot: any) {
         if (snapshot?.version !== 2) throw new Error('Incompatible snapshot: Milestone 1 requires version 2; start a fresh isolated demo');
+        if (snapshot.orderbooks?.some((book: any) => book.baseAsset === 'TATA')) {
+            throw new Error('Legacy TATA snapshot: preserve it and start a fresh SOL demo with WITH_SNAPSHOT empty; assets and executions are not converted');
+        }
+        // Each process boot has a new generation, including rollback to an older snapshot.
+        this.revision = snapshot.revision ?? 0;
+        this.requests = new Map(snapshot.requests ?? []);
+        this.recentTrades = new Map(snapshot.recentTrades ?? []);
+        this.candles = new Map(snapshot.candles ?? []);
         const units = (value: unknown) => {
             if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,39})$/.test(value)) throw new Error('Invalid snapshot units');
             return BigInt(value);
@@ -259,7 +339,7 @@ export class Engine {
             return new Orderbook(b.baseAsset, orders(b.bids), orders(b.asks), b.lastTradeId, units(b.currentPrice));
         });
         this.balances = new Map(snapshot.balances.map(([id, assets]: [string, Record<string, any>]) => {
-            validateMessage({ type: 'GET_OPEN_ORDERS', data: { userId: id, market: 'TATA_INR' } });
+            validateMessage({ type: 'GET_OPEN_ORDERS', data: { userId: id, market: 'SOL_INR' } });
             return [id, Object.fromEntries(Object.entries(assets).map(([symbol, b]) => {
                 if (!/^[A-Z][A-Z0-9]{0,11}$/.test(symbol)) throw new Error('Invalid snapshot asset');
                 return [symbol, { available: units(b.available), locked: units(b.locked) }];
