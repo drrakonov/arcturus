@@ -35,6 +35,10 @@ export interface MarketSnapshot {
     candleHistory: boolean;
 }
 export type MessageFromApi = {
+    type: 'MARKET_ORDER'; data: { market: string; protectionPrice: string; quantity: string; side: 'buy' | 'sell'; userId: string }
+} | {
+    type: 'RUN_SCENARIO'; data: { userId: string; scenario: ScenarioKind }
+} | {
     type: 'CREATE_ACCOUNT' | 'GET_ACCOUNT', data: { userId: string }
 } | {
     type: 'GET_MARKET', data: { market: string }
@@ -78,7 +82,7 @@ export type MessageFromApi = {
         baseAsset: string   // e.g. "ETH" — quote asset is always INR
     }
 }
-export type MessageToApi = {
+export type MessageToApi = { type: 'SCENARIO'; payload: ScenarioResult } | {
     type: 'ACCOUNT', payload: AccountSnapshot
 } | {
     type: 'MARKET', payload: MarketSnapshot
@@ -99,6 +103,7 @@ export type MessageToApi = {
     payload: {
         orderId: string,
         executedQty: number,
+        cancelledQty?: number,
         fills: {
             price: string,
             qty: number,
@@ -151,7 +156,7 @@ export type TradeAddedMessage = {
     }
 }
 
-export type WsMessage = TickerUpdateMessage | DepthUpdateMessage | TradeAddedMessage |
+export type WsMessage = { stream: string; data: { e: 'trace'; event: TraceEvent; forwardedAt?: number } } | TickerUpdateMessage | DepthUpdateMessage | TradeAddedMessage |
     { stream: string; data: { e: 'account'; snapshot: AccountSnapshot } } |
     { stream: string; data: { e: 'market'; snapshot: MarketSnapshot } };
 
@@ -216,7 +221,7 @@ export type DbMessage =
 // One committed engine command becomes one database transaction. Quantities are exact strings.
 export interface HistoryOrder {
     orderId: string; userId: string; market: string; side: 'buy' | 'sell';
-    price: string; quantity: string; executedQty: string;
+    price: string; quantity: string; executedQty: string; orderType?: 'limit' | 'market';
     status: 'open' | 'partially_filled' | 'filled' | 'cancelled';
     createdAt: number; updatedAt: number;
 }
@@ -225,6 +230,25 @@ export interface HistoryTrade extends TradeAddedData {
 }
 export interface PersistenceBatch {
     type: 'PERSISTENCE_BATCH'; version: 1; eventId: string; historyId: string;
-    revision: number; timestamp: number; orders: HistoryOrder[]; trades: HistoryTrade[];
+    revision: number; timestamp: number; traceId?: string; orders: HistoryOrder[]; trades: HistoryTrade[];
 }
 export interface HistoryPage<T> { rows: T[]; nextCursor: string | null }
+
+export type ScenarioKind = 'partial-fill' | 'price-improvement' | 'fifo';
+export interface ScenarioResult {
+    scenario: ScenarioKind; historyId: string; market: string; inspectedOrderId: string;
+    steps: { label: string; orderId: string; executedQty: number; cancelledQty?: number }[];
+    fills: { makerOrderId: string; takerOrderId: string; price: string; quantity: string }[];
+    orders: HistoryOrder[];
+}
+export interface TraceEvent {
+    id: string; traceId: string; at: number;
+    stage: 'api_received' | 'queued' | 'engine_committed' | 'engine_rejected' | 'engine_replayed' | 'api_replied' | 'db_committed' | 'db_failed';
+    orderId?: string; eventId?: string;
+}
+export interface ExecutionDetails {
+    order: HistoryOrder;
+    summary: { fillCount: number; executedQuantity: string; quoteQuantity: string; averagePrice: string | null; priceImprovement: string };
+    fills: { id: string; price: string; quantity: string; makerOrderId: string; takerOrderId: string; timestamp: number; role: 'maker' | 'taker' }[];
+    nextCursor: string | null;
+}

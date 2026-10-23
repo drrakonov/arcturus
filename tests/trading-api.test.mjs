@@ -47,3 +47,18 @@ test('API maps validation/business errors to non-success status and payloads', a
     assert.equal((await call(deleteOrder, { body: { market: 'SOL_INR', orderId: res.body.payload.orderId } })).statusCode, 200);
   } finally { RedisManager.getInstance = original; }
 });
+
+test('demo controls are disabled by default and reject an incorrect operator key',async()=>{
+  const {scenario,pause}=await import('../api/dist/controllers/demo.controller.js');
+  const saved=process.env.DEMO_CONTROL_TOKEN;
+  try {
+    for(const key of ['', 'configured-test-operator-key']) {
+      process.env.DEMO_CONTROL_TOKEN=key;
+      for(const handler of [scenario,pause]) {
+        const req={body:{scenario:'fifo',seconds:1},get:()=> 'incorrect-key'};
+        const res={locals:{userId:'1'},statusCode:0,status(code){this.statusCode=code;return this;},json(body){return body;}};
+        await handler(req,res);assert.equal(res.statusCode,403);
+      }
+    }
+  } finally {if(saved===undefined)delete process.env.DEMO_CONTROL_TOKEN;else process.env.DEMO_CONTROL_TOKEN=saved;}
+});

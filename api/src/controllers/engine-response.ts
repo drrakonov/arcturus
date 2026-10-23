@@ -7,7 +7,7 @@ import { RedisManager } from '../managers/redisManager.js';
 const status: Record<ErrorCode, number> = {
     UNAUTHORIZED: 401, FORBIDDEN: 403, REQUEST_CONFLICT: 409, REQUEST_TIMEOUT: 504, SERVICE_UNAVAILABLE: 503,
     INVALID_REQUEST: 400, UNKNOWN_MARKET: 404, UNKNOWN_USER: 404, ORDER_NOT_FOUND: 404,
-    INSUFFICIENT_FUNDS: 422, LIMIT_EXCEEDED: 409, DUPLICATE_TRANSACTION: 409, INTERNAL_ERROR: 500,
+    NO_LIQUIDITY: 422, INSUFFICIENT_FUNDS: 422, LIMIT_EXCEEDED: 409, DUPLICATE_TRANSACTION: 409, INTERNAL_ERROR: 500,
 };
 export async function engineResponse(res: Response, command: unknown, successStatus = 200, requestId?: string) {
     try {

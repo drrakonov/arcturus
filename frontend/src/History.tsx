@@ -4,7 +4,7 @@ import type { HistoryOrder, HistoryPage } from '../../packages/contracts/src/ind
 interface Trade { id: string; price: string; quantity: string; quoteQuantity: string; timestamp: number; side: string }
 const number = (value: string) => Number(value).toLocaleString('en-IN', { maximumFractionDigits: 6 });
 
-export function History({ token, revision }: { token?: string; revision?: number }) {
+export function History({ token, revision, onInspect }: { token?: string; revision?: number; onInspect: (id: string) => void }) {
   const [kind, setKind] = useState<'orders' | 'trades'>('orders');
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
   const [data, setData] = useState<HistoryPage<HistoryOrder | Trade> | null>(null);
@@ -34,8 +34,8 @@ export function History({ token, revision }: { token?: string; revision?: number
       <button disabled={loading || !token} onClick={() => { setCursors([undefined]); setRefresh(v => v+1); }}>Refresh history</button></div>
     <p className="history-note" role="status">{loading ? 'Loading history…' : 'Saved history · recent actions may take a moment to appear.'}</p>
     {error && <p className="history-error" role="alert">{error}</p>}
-    <div className="table-scroll" data-native-scroll><table aria-label={kind === 'orders' ? 'Order history' : 'Trade history'}><thead><tr><th>Time</th><th>Side</th><th>Price</th><th>Quantity</th><th>{kind === 'orders' ? 'Filled' : 'Value (INR)'}</th>{kind === 'orders' && <th>Status</th>}</tr></thead><tbody>
-      {data?.rows.map(row => 'orderId' in row ? <tr key={row.orderId}><td>{new Date(row.updatedAt).toLocaleString()}</td><td className={`${row.side}-text`}>{row.side}</td><td>{number(row.price)}</td><td>{number(row.quantity)}</td><td>{number(row.executedQty)}</td><td>{row.status.replace('_', ' ')}</td></tr> :
+    <div className="table-scroll" data-native-scroll><table aria-label={kind === 'orders' ? 'Order history' : 'Trade history'}><thead><tr><th>Time</th><th>Side</th><th>Price</th><th>Quantity</th><th>{kind === 'orders' ? 'Filled' : 'Value (INR)'}</th>{kind === 'orders' && <><th>Status</th><th>Execution</th></>}</tr></thead><tbody>
+      {data?.rows.map(row => 'orderId' in row ? <tr key={row.orderId}><td>{new Date(row.updatedAt).toLocaleString()}</td><td className={`${row.side}-text`}>{row.side}</td><td>{number(row.price)}</td><td>{number(row.quantity)}</td><td>{number(row.executedQty)}</td><td>{row.status.replace('_', ' ')}</td><td><button onClick={()=>onInspect(row.orderId)}>Inspect</button></td></tr> :
         <tr key={row.id}><td>{new Date(row.timestamp).toLocaleString()}</td><td className={`${row.side}-text`}>{row.side}</td><td>{number(row.price)}</td><td>{number(row.quantity)}</td><td>{number(row.quoteQuantity)}</td></tr>)}
     </tbody></table></div>
     {!data?.rows.length && !loading && !error && <div className="empty compact">No saved {kind} for this account yet.</div>}

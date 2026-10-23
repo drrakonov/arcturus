@@ -17,7 +17,7 @@ export function validateBatch(value: unknown): PersistenceBatch {
     const orders = new Set<string>();
     for (const o of b.orders) {
         if (!o || !identifier(o.orderId) || orders.has(o.orderId) || !integer(o.createdAt) || o.createdAt > b.timestamp ||
-            o.updatedAt !== b.timestamp) throw new Error('Invalid order metadata');
+            o.updatedAt !== b.timestamp || (o.orderType !== undefined && !['limit','market'].includes(o.orderType))) throw new Error('Invalid order metadata');
         orders.add(o.orderId);
         validateMessage({ type: 'CREATE_ORDER', data: { market: o.market, price: o.price, quantity: o.quantity, side: o.side, userId: o.userId } });
         const q = quantity(o.quantity), filled = quantity(o.executedQty, true);
@@ -52,14 +52,14 @@ export async function persistBatch(value: unknown): Promise<void> {
             ON CONFLICT DO NOTHING RETURNING event_id`, [batch.eventId, batch.timestamp, retentionDays()]);
         if (inserted.rowCount) {
             for (const o of batch.orders) await client.query(`INSERT INTO orders
-                (order_id, market, price, quantity, executed_qty, side, user_id, history_id, status, revision, created_at, updated_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,to_timestamp($11/1000.0),to_timestamp($12/1000.0))
+                (order_id, market, price, quantity, executed_qty, side, user_id, history_id, status, revision, created_at, updated_at, order_type)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,to_timestamp($11/1000.0),to_timestamp($12/1000.0),$13)
                 ON CONFLICT(order_id) DO UPDATE SET executed_qty=EXCLUDED.executed_qty,
                     status=EXCLUDED.status, revision=EXCLUDED.revision, updated_at=EXCLUDED.updated_at,
                     user_id=EXCLUDED.user_id, history_id=EXCLUDED.history_id
                 WHERE orders.revision < EXCLUDED.revision AND
                     (orders.user_id IS NULL OR (orders.user_id=EXCLUDED.user_id AND orders.history_id=EXCLUDED.history_id))`,
-                [o.orderId,o.market,o.price,o.quantity,o.executedQty,o.side,o.userId,batch.historyId,o.status,batch.revision,o.createdAt,o.updatedAt]);
+                [o.orderId,o.market,o.price,o.quantity,o.executedQty,o.side,o.userId,batch.historyId,o.status,batch.revision,o.createdAt,o.updatedAt,o.orderType ?? 'limit']);
             for (const t of batch.trades) await client.query(`INSERT INTO trades
                 (id,market,price,quantity,quote_qty,is_buyer_maker,timestamp,history_id,sequence,buyer_id,seller_id,maker_order_id,taker_order_id)
                 VALUES ($1,$2,$3,$4,$5,$6,to_timestamp($7/1000.0),$8,$9,$10,$11,$12,$13) ON CONFLICT DO NOTHING`,

@@ -235,3 +235,47 @@ test('event transport exception never reports a committed trade as rejected', ()
     assert.equal(errors.length, 1);
   } finally { console.error = original; }
 });
+
+test('protected market orders fill within the bound and release the complete unfilled reserve on either side', () => {
+  for (const side of ['buy','sell']) {
+    const c=setup(),before=totals(c.engine),user=side==='buy'?'1':'2';
+    c.place(side==='buy'?'sell':'buy',side==='buy'?'9':'11','1');
+    c.place(side==='buy'?'sell':'buy',side==='buy'?'12':'8','1');
+    const result=c.engine.createOrder(market,'10','3',side,user,true);
+    assert.equal(result.executedQty,1);assert.equal(result.cancelledQty,2);
+    assert.equal(result.fills[0].price,side==='buy'?'9':'11');
+    assert.equal(balance(c.engine,user,side==='buy'?'INR':'SOL').locked,'0');
+    assert.equal(c.engine.getAccount(user).openOrders.length,0);
+    assert.deepEqual(totals(c.engine),before);
+    const batch=c.events.filter(e=>e.type==='PERSISTENCE_BATCH').at(-1);
+    assert.equal(batch.orders[0].status,'cancelled');assert.equal(batch.orders[0].orderType,'market');
+  }
+});
+test('protected no-liquidity rejection is atomic and successful retries do not execute twice',()=>{
+  const c=setup();c.place('sell','11','1');
+  rejectsUnchanged(c,()=>c.engine.createOrder(market,'10','2','buy','1',true),'NO_LIQUIDITY');
+  const message={type:'MARKET_ORDER',data:{market,protectionPrice:'12',quantity:'2',side:'buy',userId:'1'}};
+  const first=c.engine.process({message,clientId:'trace1',requestId:'market-retry'}),before=c.engine.getSnapshot();
+  assert.equal(first.payload.cancelledQty,1);
+  assert.deepEqual(c.engine.process({message,clientId:'trace2',requestId:'market-retry'}),first);
+  assert.deepEqual(c.engine.getSnapshot(),before);
+  c.command('MARKET_ORDER',{...message.data,protectionPrice:'NaN'});
+  assert.equal(c.replies.at(-1).payload.code,'INVALID_REQUEST');
+});
+test('controlled scenarios use real matching, persist real fills, isolate the live book, and deduplicate',()=>{
+  for(const scenario of ['partial-fill','price-improvement','fifo']) {
+    const c=setup(),before=c.engine.getAccount('1'),book=c.engine.getMarket(market);
+    const message={type:'RUN_SCENARIO',data:{userId:'1',scenario}};
+    const result=c.engine.process({message,clientId:'scenario',requestId:'scenario-retry'});
+    assert.equal(result.type,'SCENARIO');
+    const r=result.payload;
+    assert.equal(r.market,'DEMO_INR');assert.ok(r.fills.length>0);assert.equal(r.fills[0].price,'9');
+    if(scenario==='fifo')assert.deepEqual(r.fills.map(f=>f.quantity),['1','0.5']);
+    if(scenario==='partial-fill')assert.equal(r.orders[0].status,'cancelled');
+    assert.deepEqual(c.engine.getAccount('1'),before);assert.deepEqual(c.engine.getMarket(market),book);
+    const count=c.events.length;
+    assert.deepEqual(c.engine.process({message,clientId:'scenario2',requestId:'scenario-retry'}),result);
+    assert.equal(c.events.length,count);
+    assert.ok(c.events.filter(e=>e.type==='PERSISTENCE_BATCH').every(e=>e.traceId==='scenario'));
+  }
+});

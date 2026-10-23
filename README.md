@@ -428,3 +428,51 @@ npm run replay:failed -- 50
 Replay retains original event IDs. Do not run an old worker alongside the upgraded
 one. Integration tests use disposable resources, verify rollback/replay and kill a
 worker after its queue claim; they never invoke Docker themselves.
+
+
+### Execution inspector and engineering lab
+
+The terminal supports limit orders and **protected market orders**. A protected
+order is immediate-or-cancel with an explicit maximum buy price or minimum sell
+price. It uses the same matching and exact settlement path as limit orders. Any
+unfilled quantity is cancelled and its reserve released; no liquidity within the
+bound returns `NO_LIQUIDITY` without changing balances. Buys require enough funds
+for the entire quantity at the protection price. This is not an unbounded market
+order. POST `/api/v1/order` with `orderType: "market"`, `protectionPrice`, `quantity`,
+`side`, `market`, the session token and an `Idempotency-Key`.
+
+**Inspect** on open orders or order history opens saved execution details, including
+maker/taker order IDs, your role, weighted average price and improvement relative
+to the submitted limit/protection price. GET `/api/v1/order/:orderId/executions`
+requires the owning session and supports `limit` (1–100) and `cursor`. SQL reads use
+one consistent snapshot. Persistence is asynchronous: a new order can return 404
+until saved, and a recently filled order may briefly show its previous saved state.
+
+**Inside Arcturus** displays real API, Redis, engine and database observations,
+plus actual WebSocket forwarding/browser receipt. GET `/api/v1/demo/telemetry`
+returns only the session's traces and aggregate persistence queue counts. Traces
+retain the latest 100 events per account and expire after eight hours of inactivity; they are best-effort
+observations, not a durable audit log or latency benchmark. Missing events do not
+prove a failed order. Reconnection restores available service observations through
+REST; old browser/WS receipt is not invented.
+
+Optional operator controls are disabled by default. Set `DEMO_CONTROL_TOKEN` on the
+API to a private value of at least 16 characters, restart the API, and enter it under
+**Controlled demonstrations**. Do not place this key in frontend environment
+variables or commit it. The UI holds it only in memory. These authenticated routes
+also require `X-Demo-Control-Token`:
+
+- POST `/api/v1/demo/scenario`: `scenario` is `partial-fill`, `price-improvement`, or
+  `fifo`; requires `Idempotency-Key`. Each run uses a separate real matching-engine
+  instance and DEMO/INR balances, then sends its actual lifecycle batches through
+  the real persistence worker. SOL balances/book and public market data are untouched.
+- POST `/api/v1/demo/persistence-delay`: `seconds` from 1–15 pauses the shared worker;
+  0 resumes it. The Redis pause expires automatically; starts have a 30-second
+  cooldown. The UI distinguishes a requested pause from worker acknowledgement.
+  Matching and private balance updates continue while SQL writes wait.
+
+Scenarios use virtual funds and are explicitly isolated demonstrations, not live
+SOL executions. Scenario retries share the existing bounded ten-minute engine
+request cache; retries are not guaranteed across engine restarts. Delay requests
+can affect all users of the same worker, so keep the operator key private. Rebuild
+the worker for the additive order-type/index migration before using these features.
