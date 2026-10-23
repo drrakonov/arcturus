@@ -252,3 +252,4 @@ export interface ExecutionDetails {
     fills: { id: string; price: string; quantity: string; makerOrderId: string; takerOrderId: string; timestamp: number; role: 'maker' | 'taker' }[];
     nextCursor: string | null;
 }
+export { startHeartbeat, RESET_KEY, HEARTBEAT_PREFIX } from './runtime.js';

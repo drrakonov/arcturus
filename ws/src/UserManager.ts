@@ -19,7 +19,10 @@ export class UserManager {
     }
 
 
+    public disconnectAll() { for (const user of this.users.values()) user.disconnect(); }
+
     public addUser(ws: WebSocket) {
+        if (this.users.size >= 200) { ws.close(1013,'Demo connection capacity reached'); return; }
         const id = this.getRandomId();
         const user = new User(id, ws);
         this.users.set(id, user);
@@ -31,7 +34,7 @@ export class UserManager {
 
     private registerOnClose(ws: WebSocket, userId: string) {
         ws.on("close", () => {
-            console.log("one userLeft");
+
             this.users.delete(userId);
             SubscriptionManager.getInstance().userLeft(userId);
         })

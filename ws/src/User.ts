@@ -23,6 +23,7 @@ export class User {
         this.ws.send(JSON.stringify(message));
     }
     emit(message: OutgoingMessage) { this.send(message.data.e === 'trace' ? { ...message, data: { ...message.data, forwardedAt: Date.now() } } : message); }
+    disconnect() { this.ws.close(1012,'Service reconnecting'); }
     private async receive(raw: string) {
         if (this.closed) return;
         let message;

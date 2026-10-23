@@ -18,7 +18,7 @@ async function run(directory, args) {
 async function start() {
   // Compose owns the database worker. Do not start a second competing consumer.
   const children = ['engine', 'api', 'ws'].map(service => spawn(process.execPath,
-    ['dist/index.js'], { cwd: `${root}${service}`, stdio: 'inherit' }));
+    ['dist/index.js'], { cwd: `${root}${service}`, env: { ...process.env, NODE_OPTIONS: process.env.NODE_OPTIONS || '--max-old-space-size=256' }, stdio: 'inherit' }));
   let stopping = false;
   const stop = code => {
     if (stopping) return;

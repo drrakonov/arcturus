@@ -41,11 +41,12 @@ export default function Terminal() {
     </button>);
   };
   return <div className="shell">
+    <a className="skip-link" href="#trading-content">Skip to trading</a>
     <header className="topbar"><a className="brand" href="/" aria-label="Arcturus home"><span className="brand-mark">✳</span><span>ARCTURUS<small>EXCHANGE</small></span></a>
       <nav aria-label="Main navigation"><span className="nav-active">Spot trading</span><span className="demo-badge">DEMO</span></nav>
       <div className="top-right"><span className={`connection ${t.status}`} role="status"><i/>{({ live: 'Live connection', connecting: 'Connecting', reconnecting: 'Reconnecting', failed: 'Connection failed', expired: 'Session expired' } as Record<string, string>)[t.status]}</span>
       <span className="avatar">{t.session ? t.session.userId.slice(0, 2).toUpperCase() : '··'}</span></div></header>
-    <main>
+    <main id="trading-content" tabIndex={-1}>
       <div className="intro"><h1>Trading terminal <span>01 / SOL–INR</span></h1><a className="secondary" href="/trade" target="_blank" rel="noopener noreferrer">Open second trader <ArrowUpRight size={14}/></a></div>
       <section className="market-strip" aria-label="Market summary"><div className="pair"><span className="coin"><img src="/solana.svg" alt="Solana" width="25" height="20"/></span><div><strong>SOL <span>/ INR</span></strong><small>Solana · Demo spot market</small></div></div>
         <div className="quote"><strong className={last?.isBuyerMaker ? 'sell-text' : 'buy-text'}>{last ? `₹${fmt(last.price)}` : '—'}</strong><small>Last executed price</small></div>

@@ -1063,3 +1063,9 @@ button.submit[data-clicked] { box-shadow:inset 0 0 0 2px #c7ffea; }
 .execution-metrics strong { display: block; color: #e1e5ed; font-size: 15px; margin-top: 5px; overflow-wrap: anywhere; }
 .mono { font-family: monospace; font-size: 11px; overflow-wrap: anywhere; }
 @media(max-width: 700px) { .service-flow { grid-template-columns: repeat(2,1fr); } .execution-metrics { grid-template-columns: repeat(2,1fr); } .engineering label { flex-wrap: wrap; } .engineering { padding-inline: 12px; } }
+
+
+.skip-link { position: fixed; top: 8px; left: 12px; z-index: 100; padding: 12px; background: #e6e9ee; color: #11151c; transform: translateY(-160%); }
+.skip-link:focus { transform: translateY(0); }
+select:focus-visible,summary:focus-visible { outline: 2px solid #63c7ad; outline-offset: 3px; }
+@media(max-width:700px) { .engineering button,.history-controls button,.cancel { min-height: 40px; } }

@@ -1,3 +1,5 @@
+import { verifyReliability } from './reliability-integration.mjs';
+import { once } from 'node:events';
 // Runs host services against user-managed local Redis/PostgreSQL; never invokes Docker.
 // Creates and removes its own PostgreSQL database; requires an unused Redis DB 15.
 import assert from 'node:assert/strict';
@@ -26,7 +28,7 @@ const operatorKey = randomUUID();
 const env = { ...process.env, DEMO_CONTROL_TOKEN: operatorKey, REDIS_URL: redisUrl, POSTGRES_HOST: pgConfig.host,
   POSTGRES_PORT: String(pgConfig.port), POSTGRES_USER: pgConfig.user, POSTGRES_PASSWORD: pgConfig.password,
   API_BASE_URL: `http://127.0.0.1:${Number(process.env.TEST_API_PORT ?? 13000)}`, TOTAL_BIDS: '4', TOTAL_ASKS: '4', INTERVAL_MS: '250',
-  POSTGRES_DB: db, WITH_SNAPSHOT: '', CORS_ORIGIN: 'http://127.0.0.1:15173', REQUEST_TIMEOUT_MS: '1200' };
+  POSTGRES_DB: db, SNAPSHOT_PATH: join(dir,'snapshot.json'), WITH_SNAPSHOT: '', CORS_ORIGIN: 'http://127.0.0.1:15173', REQUEST_TIMEOUT_MS: '1200' };
 const apiPort = Number(process.env.TEST_API_PORT ?? 13000), wsPort = Number(process.env.TEST_WS_PORT ?? 13001);
 const children = [], events = [];
 let logs = '', created = false, ownsRedis = false, pool, socket, privateSocket;
@@ -34,9 +36,9 @@ const admin = new Pool({ ...pgConfig, database: 'my_database' });
 const redis = createClient({ url: redisUrl, socket: { reconnectStrategy: false, connectTimeout: 3000 } });
 redis.on('error', () => {});
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-function launch(service, port) {
+function launch(service, port, overrides = {}) {
   const child = spawn(process.execPath, [join(root, service, 'dist/index.js')], {
-    cwd: dir, env: { ...env, PORT: String(port ?? 0) }, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: dir, env: { ...env, PORT: String(port ?? 0), ...overrides }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   children.push(child);
   child.on('error', error => { logs += `${service}: ${error.message}\n`; });
@@ -89,6 +91,9 @@ try {
       logs.includes('Engine is connected to Redis!') && logs.includes('SubscriptionManager: Redis client connected.'); }
     catch { return false; }
   }, 'service readiness');
+  assert.equal((await fetch(`http://127.0.0.1:${apiPort}/healthz`)).status,200);
+  await until(async()=>(await fetch(`http://127.0.0.1:${apiPort}/readyz`)).status===200,'complete service readiness');
+  assert.equal((await fetch(`http://127.0.0.1:${wsPort}/readyz`)).status,200);
   socket = new WebSocket(`ws://127.0.0.1:${wsPort}`);
   socket.on('message', raw => events.push(JSON.parse(raw.toString())));
   await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
@@ -179,14 +184,17 @@ try {
   assert.equal(maker.exitCode, 0, 'simulator graceful cleanup');
   children.splice(children.indexOf(maker),1);
   // A stopped consumer must produce a bounded HTTP error, not an indefinitely hanging request.
-  children.find(c => c.spawnargs.includes(join(root, 'engine', 'dist/index.js'))).kill('SIGTERM');
-  await delay(400);
+  const oldEngine=children.find(c => c.spawnargs.includes(join(root, 'engine', 'dist/index.js')));
+  const oldEngineExit=once(oldEngine,'exit');oldEngine.kill('SIGTERM');await oldEngineExit;
+  assert.equal(oldEngine.exitCode,0);children.splice(children.indexOf(oldEngine),1);
+  assert.equal((await fetch(`http://127.0.0.1:${apiPort}/readyz`)).status,503);
   const snapshot = JSON.parse(await readFile(join(dir, 'snapshot.json'), 'utf8'));
   const balances = Object.fromEntries(snapshot.balances);
   assert.equal(balances[buyer.userId].INR.available, '99999999999'); assert.equal(balances[buyer.userId].INR.locked, '0');
   assert.equal(balances[seller.userId].SOL.available, '99999900'); assert.equal(balances[seller.userId].SOL.locked, '0');
   const timeout = await request('/api/v1/order', { ...order, side: 'buy' }, 504, 'POST', buyer.token);
   assert.equal(timeout.code, 'REQUEST_TIMEOUT');
+  await verifyReliability({redis,redisUrl,dir,pool,request,buyer,launch,children,until});
   console.log('PASS: authenticated sessions, ownership, concurrent deduplication, bounded timeout, private notifications;  real HTTP/Redis/engine/worker/PostgreSQL/WebSocket integration; exact fractional settlement, refund, partial cancellation, errors, events and order persistence.');
 } catch (error) { console.error(error); process.exitCode = 1; }
 finally {
@@ -199,7 +207,7 @@ finally {
   await admin.end();
   if (redis.isOpen) {
     if (ownsRedis) {
-      const keys = [...await redis.keys('demo:session:*'), ...await redis.keys('trace:*'), 'demo:pause', 'demo:worker-paused', 'demo:pause-cooldown'];
+      const keys = [...await redis.keys('demo:session:*'), ...await redis.keys('trace:*'),...await redis.keys('runtime:*'), 'demo:pause', 'demo:worker-paused', 'demo:pause-cooldown'];
       await redis.del(['message', 'db_processor', 'db_processor:processing', 'db_processor:failed', ...keys]);
     }
     await redis.quit();

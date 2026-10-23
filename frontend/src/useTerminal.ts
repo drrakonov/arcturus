@@ -93,8 +93,12 @@ export function useTerminal() {
       };
       ws.onerror = () => ws.close();
     };
+    const online = () => { if (socket.current?.readyState === WebSocket.CLOSED) { clearTimeout(retry); connect(); } };
+    const offline = () => { setStatus('reconnecting'); socket.current?.close(); };
+    window.addEventListener('online',online);window.addEventListener('offline',offline);
     connect();
-    return () => { stopped = true; clearTimeout(retry); clearInterval(interval); clearInterval(refresh); socket.current?.close(); };
+    return () => { window.removeEventListener('online',online);window.removeEventListener('offline',offline); cleanup(); };
+    function cleanup() { stopped = true; clearTimeout(retry); clearInterval(interval); clearInterval(refresh); socket.current?.close(); };
   }, [session]);
   const execute = useCallback(async (action: PendingAction) => {
     if (!session || inFlight.current) return;

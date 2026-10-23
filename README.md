@@ -476,3 +476,63 @@ SOL executions. Scenario retries share the existing bounded ten-minute engine
 request cache; retries are not guaranteed across engine restarts. Delay requests
 can affect all users of the same worker, so keep the operator key private. Rebuild
 the worker for the additive order-type/index migration before using these features.
+
+
+### Local reliability and offline demo reset
+
+The engine writes snapshots through a same-directory temporary file, file sync,
+atomic rename and directory sync. A serialization/write/rename failure preserves
+the previous snapshot; a directory-sync failure is reported even if rename already
+succeeded. Periodic snapshots remain three seconds apart. Graceful shutdown finishes
+the current command, saves state and flushes the Redis sink before exiting. This
+prevents torn files; it does not add event sourcing or eliminate the crash window
+between engine state, Redis delivery and asynchronous SQL writes. Restoring an older
+snapshot against newer SQL history remains unsupported.
+
+`SNAPSHOT_PATH` chooses the engine state file; its parent directory must already
+exist. `WITH_SNAPSHOT=1` restores it and fails startup on missing/corrupt state.
+Without that flag, the engine starts fresh. Never start a second engine in the same
+Redis namespace. Stop and drain the demo before resetting; do not merely delete a
+snapshot while services are running.
+
+The offline reset tool requires all API, engine, WebSocket, simulator and worker
+processes stopped, but Redis still running. It checks process heartbeats and refuses
+nonempty command, pending, processing or failed queues. If work remains, restart the
+services and drain/replay it before trying again. Stop the frontend too to avoid
+automatic requests while restarting. Run from the repository, adjusting the explicit
+Redis URL and absolute snapshot path to your stack:
+
+```bash
+RESET_DEMO=1 REDIS_URL=redis://127.0.0.1:16379/14 \
+  SNAPSHOT_PATH=/absolute/path/to/engine/snapshot.json npm run reset:demo
+```
+
+A successful reset copies the old snapshot to a private `.reset-*.bak` backup, writes
+a fresh engine snapshot/history identity, invalidates guest sessions and clears demo
+traces/pause controls. Saved SQL history is retained under its old identity and normal
+retention. Restart with `WITH_SNAPSHOT=1` and the same `SNAPSHOT_PATH`, then start a new
+browser session. The guard blocks upgraded services from starting during reset;
+heartbeats expire after eight seconds when a process crashes. This is a local offline
+operator workflow, not a distributed transaction: on an I/O/network error inspect the
+reported backup and rerun with every app service still stopped. Old service binaries
+without heartbeats must also be stopped manually. No Docker or SQL deletion commands
+are executed by the reset tool.
+
+API `/healthz` reports process liveness. `/readyz` checks Redis, PostgreSQL and recent
+engine/worker/WebSocket heartbeats, returning 503 when unavailable or missing. WS
+provides `/healthz` and `/readyz` on its existing port. Heartbeats describe recent
+process presence (up to eight seconds stale), not proof that every queued write has
+succeeded; inspect the engineering lab's failed/pending counts too. Restart the engine
+after Redis connection loss; WS clients reconnect and resynchronize authoritative
+account and market state. Browser offline/online changes immediately disable order
+entry and initiate recovery. Keyboard skip navigation, visible select/summary focus,
+and mobile control targets complement the existing reduced-motion support.
+
+Compose caps PostgreSQL at 512 MiB, Redis at 128 MiB (96 MiB data, `noeviction`), and
+the worker at 256 MiB. Container logs rotate at 10 MiB with three files retained.
+`npm start` defaults each host service to a 256 MiB V8 heap limit unless NODE_OPTIONS
+is set; the worker uses 128 MiB. Heap limits are not total process memory limits.
+WebSocket connections are capped at 200 and API JSON bodies at 16 KiB. These are demo
+bounds, not measured cloud sizing guarantees. Container enforcement and full-stack
+resource measurements still require deployment verification; Docker remains operator
+controlled. Redis capacity errors must be investigated, not hidden by evicting orders.

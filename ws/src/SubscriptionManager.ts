@@ -1,3 +1,4 @@
+import { startHeartbeat } from '@arcturus/contracts';
 import { createClient, type RedisClientType } from "redis";
 import { UserManager } from "./UserManager.js";
 
@@ -13,6 +14,7 @@ export class SubscriptionManager {
     private constructor() {
         this.redisClient = createClient({ url: process.env.REDIS_URL || "redis://localhost:6379" });
         this.commands = createClient({ url: process.env.REDIS_URL || "redis://localhost:6379", disableOfflineQueue: true });
+        this.redisClient.on('reconnecting',()=>UserManager.getInstance().disconnectAll());
         this.redisClient.on('error', error => console.error('WS subscription:', error.message));
         this.commands.on('error', error => console.error('WS sessions:', error.message));
     }
@@ -35,6 +37,9 @@ export class SubscriptionManager {
         return this.instance;
     }
 
+    public get ready() { return this.redisClient.isReady && this.commands.isReady; }
+    public startRuntime(onFailure: (error: unknown)=>void) { return startHeartbeat(this.commands,'ws',onFailure); }
+    public async close() { await Promise.all([this.redisClient.quit(),this.commands.quit()]); }
     public async authenticate(token: unknown): Promise<{ userId: string; expiresAt: number } | null> {
         if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) return null;
         const raw = await this.commands.get(`demo:session:${token}`);
@@ -69,8 +74,7 @@ export class SubscriptionManager {
             const parsedMessage = JSON.parse(message);
             this.reverseSubscriptions.get(channel)?.forEach(s => UserManager.getInstance().getUser(s)?.emit(parsedMessage));
         } catch (err) {
-            console.log(message);
-            console.log("Error in emitting messages to all channel", err)
+            console.error("[ws] Invalid stream message", err)
         }
     }
 

@@ -1,6 +1,13 @@
 services:
   timescaledb:
     image: timescale/timescaledb:latest-pg17@sha256:b346edcdb51a1fd6020e3965e0bd1c9f3406fa6d5fbce1e28f4852587ef934e2
+    mem_limit: 512m
+    cpus: 1.0
+    logging: &bounded-logs
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     container_name: timescaledb
     restart: unless-stopped
     ports:
@@ -19,6 +26,10 @@ services:
 
   redis:
     image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    mem_limit: 128m
+    cpus: 0.5
+    logging: *bounded-logs
+    command: ["redis-server", "--maxmemory", "96mb", "--maxmemory-policy", "noeviction"]
     container_name: redis
     restart: unless-stopped
     ports:
@@ -33,6 +44,9 @@ services:
     build:
       context: ..
       dockerfile: db-processor/Dockerfile
+    mem_limit: 256m
+    cpus: 0.5
+    logging: *bounded-logs
     container_name: db-processor
     restart: unless-stopped
     depends_on:
@@ -41,6 +55,7 @@ services:
       redis:
         condition: service_healthy
     environment:
+      NODE_OPTIONS: --max-old-space-size=128
       POSTGRES_HOST: timescaledb
       POSTGRES_PORT: 5432
       POSTGRES_DB: my_database

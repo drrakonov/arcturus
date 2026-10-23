@@ -1,3 +1,4 @@
+import { getPgPool } from './managers/pgManager.js';
 import { telemetry, scenario, pause } from './controllers/demo.controller.js';
 import dotenv from 'dotenv'
 dotenv.config();
@@ -16,7 +17,15 @@ const app = express();
 app.use(cors({
     origin: process.env.CORS_ORIGIN || "http://localhost:5173"
 }));
-app.use(express.json());
+app.use(express.json({limit:'16kb'}));
+app.get('/healthz', (_req,res)=>res.json({status:'alive',service:'api'}));
+app.get('/readyz', async (_req,res)=>{
+    try {
+        const [services] = await Promise.all([RedisManager.getInstance().health(),getPgPool().query('SELECT 1')]);
+        const ready = Object.values(services).every(Boolean);
+        return res.status(ready?200:503).json({status:ready?'ready':'degraded',redis:true,postgres:true,services});
+    } catch { return res.status(503).json({status:'unavailable'}); }
+});
 
 app.post('/api/v1/session', createSession);
 app.get('/api/v1/account/trades', requireSession, getAccountTrades);
@@ -41,10 +50,20 @@ app.get('/', (req, res) => {
 })
 
 async function main() {
-    await RedisManager.connect();
-    app.listen(PORT, () => {
+    const redis = await RedisManager.connect();
+    let stopping = false;
+    const stop = async (code=0) => {
+        if(stopping)return;stopping=true;
+        const deadline=setTimeout(()=>process.exit(1),5000);
+        await new Promise<void>(resolve=>server.close(()=>resolve()));
+        await stopHeartbeat(); await redis.close(); await getPgPool().end();
+        clearTimeout(deadline);process.exit(code);
+    };
+    const stopHeartbeat = await redis.startRuntime(error=>{console.error('[api] Runtime unavailable:',error);void stop(1);});
+    const server = app.listen(PORT, () => {
         console.log(`API Server listening on port ${PORT}`);
     });
+    process.once('SIGTERM',()=>void stop());process.once('SIGINT',()=>void stop());
 }
 
-main();
+main().catch(error=>{console.error('[api] Startup failed:',error);process.exit(1);});

@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { TradingError, type TraceEvent } from '@arcturus/contracts';
+import { TradingError, type TraceEvent, startHeartbeat, HEARTBEAT_PREFIX } from '@arcturus/contracts';
 import { createClient } from "redis";
 import type { MessageToEngine } from "../types/to.js";
 import type { MessageFromOrderbook } from "../types/status.js";
@@ -63,6 +63,16 @@ export class RedisManager {
         await this.sessionCommand(this.publisher.set(`demo:session:${token}`, JSON.stringify({ userId, expiresAt }), { EX: 8 * 60 * 60 }));
         return { token, userId, expiresAt };
     }
+    public async startRuntime(onFailure: (error: unknown) => void) { return startHeartbeat(this.publisher,'api',onFailure); }
+    public async health() {
+        const result = await this.sessionCommand(this.publisher.eval(`
+            local result={}; for _,service in ipairs({'engine','ws','worker'}) do
+                local keys=redis.call('KEYS',ARGV[1]..service..':*'); table.insert(result,service); table.insert(result,#keys);
+            end; return result`, {keys:[],arguments:[HEARTBEAT_PREFIX]}));
+        const values = result as (string | number)[];
+        return Object.fromEntries([0,2,4].map(i=>[String(values[i]),Number(values[i+1])>0]));
+    }
+    public async close() { await Promise.all([this.client.quit(),this.publisher.quit()]); }
     public trace(userId: string, event: TraceEvent) {
         void this.publisher.multi().lPush(`trace:${userId}`, JSON.stringify(event)).lTrim(`trace:${userId}`,0,99)
             .expire(`trace:${userId}`,28800).publish(`account@${userId}`,JSON.stringify({stream:`account@${userId}`,data:{e:'trace',event}}))

@@ -9,6 +9,7 @@ export class RedisManager {
 
     private constructor() {
         this.client = createClient({ url: process.env.REDIS_URL || "redis://localhost:6379" });
+        this.client.on('error',error=>console.error('[engine] Redis sink:',error.message));
     }
 
     // Call this ONCE at startup with await before the engine loop begins.
@@ -31,6 +32,8 @@ export class RedisManager {
         }
         return this.instance;
     }
+
+    public async close() { await this.client.quit(); }
 
     public trace(userId: string, event: TraceEvent) {
         const raw = JSON.stringify(event);

@@ -35,3 +35,7 @@ npm-debug.log*
 # Browser test output
 /frontend/test-results/
 /frontend/playwright-report/
+
+# Atomic snapshot and private reset backups
+**/snapshot.json.*.tmp
+*.reset-*.bak

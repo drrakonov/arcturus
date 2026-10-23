@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { PersistenceBatch, TraceEvent } from '@arcturus/contracts';
+import { startHeartbeat, type PersistenceBatch, type TraceEvent } from '@arcturus/contracts';
 import dotenv from 'dotenv';
 dotenv.config();
 import { createClient } from 'redis';
@@ -34,11 +34,12 @@ async function main() {
         }
         await redis.del('demo:worker-paused');
     }
+    let stopping = false;
+    const stopHeartbeat = await startHeartbeat(redis,'worker',error=>{ console.error('[worker] Runtime unavailable:',error); stopping=true; });
     // A dedicated PostgreSQL session enforces the single-worker assumption.
     const lock = await getPool().connect();
     const acquired = await lock.query('SELECT pg_try_advisory_lock(7283103) AS acquired');
     if (!acquired.rows[0].acquired) throw new Error('Another database worker is already running');
-    let stopping = false;
     lock.on('error', () => { stopping = true; });
     const stop = () => { stopping = true; };
     process.once('SIGTERM', stop); process.once('SIGINT', stop);
@@ -70,6 +71,7 @@ async function main() {
         }
     } finally {
         // Leave any unacknowledged claim for the next worker, including on SIGTERM.
+        await stopHeartbeat();
         await redis.quit();
         await lock.query('SELECT pg_advisory_unlock(7283103)').catch(() => {});
         lock.release(); await closePool();
