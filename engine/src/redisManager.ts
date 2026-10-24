@@ -1,6 +1,6 @@
-import { createClient, type RedisClientType } from "redis"
-import type { WsMessage } from "./types/toWs.js"
-import type { MessageToApi } from "./types/toApi.js"
+import { createClient, type RedisClientType } from "redis";
+import type { WsMessage } from "./types/toWs.js";
+import type { MessageToApi } from "./types/toApi.js";
 import type { DbMessage } from "@arcturus/contracts";
 
 export class RedisManager {
@@ -9,7 +9,7 @@ export class RedisManager {
 
     private constructor() {
         this.client = createClient({ url: process.env.REDIS_URL || "redis://localhost:6379" });
-        this.client.on('error',error=>console.error('[engine] Redis sink:',error.message));
+        this.client.on("error", error => console.error("[engine] Redis sink:", error.message));
     }
 
     // Call this ONCE at startup with await before the engine loop begins.
@@ -33,20 +33,25 @@ export class RedisManager {
         return this.instance;
     }
 
-    public async close() { await this.client.quit(); }
+    public async close() {
+        await this.client.quit();
+    }
 
     public pushMessage(message: DbMessage) {
-        this.client.lPush("db_processor", JSON.stringify(message))
-            .catch((err) => console.error("RedisManager.pushMessage failed:", err));
+        this.client
+            .lPush("db_processor", JSON.stringify(message))
+            .catch(err => console.error("RedisManager.pushMessage failed:", err));
     }
 
     public publishMessage(channel: string, message: WsMessage) {
-        this.client.publish(channel, JSON.stringify(message))
-            .catch((err) => console.error("RedisManager.publishMessage failed:", err));
+        this.client
+            .publish(channel, JSON.stringify(message))
+            .catch(err => console.error("RedisManager.publishMessage failed:", err));
     }
 
     public sendToApi(clientId: string, message: MessageToApi) {
-        this.client.publish(clientId, JSON.stringify(message))
-            .catch((err) => console.error("RedisManager.sendToApi failed:", err));
+        this.client
+            .publish(clientId, JSON.stringify(message))
+            .catch(err => console.error("RedisManager.sendToApi failed:", err));
     }
 }

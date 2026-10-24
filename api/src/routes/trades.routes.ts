@@ -1,5 +1,5 @@
-import { Router } from 'express';
-import { getTrades } from '../controllers/trades.controller.js';
+import { Router } from "express";
+import { getTrades } from "../controllers/trades.controller.js";
 
 const tradesRouter = Router();
 

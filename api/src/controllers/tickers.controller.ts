@@ -1,7 +1,6 @@
 import type { Request, Response } from "express";
 import { getPgPool } from "../managers/pgManager.js";
 
-
 export const getTickers = async (req: Request, res: Response) => {
     try {
         const { symbol } = req.query;
@@ -37,40 +36,39 @@ export const getTickers = async (req: Request, res: Response) => {
                 success: true,
                 payload: {
                     symbol,
-                    lastPrice:          "0",
-                    openPrice:          "0",
-                    high:               "0",
-                    low:                "0",
-                    volume:             "0",
-                    quoteVolume:        "0",
-                    priceChange:        "0",
+                    lastPrice: "0",
+                    openPrice: "0",
+                    high: "0",
+                    low: "0",
+                    volume: "0",
+                    quoteVolume: "0",
+                    priceChange: "0",
                     priceChangePercent: "0.00",
-                    tradeCount:         0,
-                },
+                    tradeCount: 0
+                }
             });
         }
 
-        const lastPrice  = Number(row.last_price);
-        const openPrice  = Number(row.open_price);
-        const priceChange        = lastPrice - openPrice;
-        const priceChangePercent = openPrice !== 0
-            ? ((priceChange / openPrice) * 100).toFixed(2)
-            : "0.00";
+        const lastPrice = Number(row.last_price);
+        const openPrice = Number(row.open_price);
+        const priceChange = lastPrice - openPrice;
+        const priceChangePercent =
+            openPrice !== 0 ? ((priceChange / openPrice) * 100).toFixed(2) : "0.00";
 
         return res.status(200).json({
             success: true,
             payload: {
                 symbol,
-                lastPrice:          row.last_price,
-                openPrice:          row.open_price,
-                high:               row.high,
-                low:                row.low,
-                volume:             row.volume,
-                quoteVolume:        row.quote_volume,
-                priceChange:        priceChange.toString(),
+                lastPrice: row.last_price,
+                openPrice: row.open_price,
+                high: row.high,
+                low: row.low,
+                volume: row.volume,
+                quoteVolume: row.quote_volume,
+                priceChange: priceChange.toString(),
                 priceChangePercent: priceChangePercent,
-                tradeCount:         Number(row.trade_count),
-            },
+                tradeCount: Number(row.trade_count)
+            }
         });
     } catch (err) {
         console.error("Failed to get the tickers", err);

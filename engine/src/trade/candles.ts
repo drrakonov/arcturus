@@ -1,17 +1,31 @@
-import { formatDecimal, parseDecimal } from '@arcturus/contracts';
-import type { Candle, CandleInterval } from '@arcturus/contracts';
+import { formatDecimal, parseDecimal } from "@arcturus/contracts";
+import type { Candle, CandleInterval } from "@arcturus/contracts";
 
 export const CANDLE_LIMIT = 180;
-export const INTERVAL_SECONDS: Record<CandleInterval, number> = { '5s': 5, '1m': 60 };
+
+export const INTERVAL_SECONDS: Record<CandleInterval, number> = { "5s": 5, "1m": 60 };
 
 // Aggregate actual fills only. Empty intervals stay empty; volume uses exact lot units.
-export function addFill(rows: Candle[], price: bigint, quantity: bigint, timestamp: number, interval: CandleInterval) {
+export function addFill(
+    rows: Candle[],
+    price: bigint,
+    quantity: bigint,
+    timestamp: number,
+    interval: CandleInterval
+) {
     const seconds = INTERVAL_SECONDS[interval];
     const time = Math.floor(timestamp / 1000 / seconds) * seconds;
     let candle = rows.find(row => row.time === time);
     const value = formatDecimal(price, 2);
     if (!candle) {
-        candle = { time, open: value, high: value, low: value, close: value, volume: formatDecimal(quantity, 4) };
+        candle = {
+            time,
+            open: value,
+            high: value,
+            low: value,
+            close: value,
+            volume: formatDecimal(quantity, 4)
+        };
         rows.push(candle);
         rows.sort((a, b) => a.time - b.time);
     } else {
