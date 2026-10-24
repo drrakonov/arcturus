@@ -1,0 +1,81 @@
+# Add to docker-compose.yml for the complete built application.
+x-app: &app
+  restart: unless-stopped
+  init: true
+  mem_limit: 384m
+  cpus: 0.5
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+x-database: &database
+  POSTGRES_HOST: timescaledb
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: ${POSTGRES_DB:-my_database}
+  POSTGRES_USER: ${POSTGRES_USER:-your_user}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in docker/.env}
+  REDIS_URL: redis://redis:6379
+services:
+  timescaledb:
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-my_database}
+      POSTGRES_USER: ${POSTGRES_USER:-your_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in docker/.env}
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+  redis:
+    command: [redis-server, --appendonly, "yes", --maxmemory, 96mb, --maxmemory-policy, noeviction]
+    volumes: [redis-data:/data]
+  db-processor:
+    environment:
+      <<: *database
+      NODE_OPTIONS: --max-old-space-size=128
+  engine:
+    <<: *app
+    build: {context: .., dockerfile: docker/service.Dockerfile, args: {SERVICE: engine}}
+    environment: {REDIS_URL: 'redis://redis:6379', SNAPSHOT_PATH: /app/state/snapshot.json, WITH_SNAPSHOT: auto}
+    volumes: [engine-state:/app/state]
+    depends_on:
+      redis: {condition: service_healthy}
+  ws:
+    <<: *app
+    build: {context: .., dockerfile: docker/service.Dockerfile, args: {SERVICE: ws}}
+    environment: {REDIS_URL: 'redis://redis:6379', PORT: 3001}
+    depends_on:
+      redis: {condition: service_healthy}
+  api:
+    <<: *app
+    build: {context: .., dockerfile: docker/service.Dockerfile, args: {SERVICE: api}}
+    environment:
+      <<: *database
+      PORT: 3000
+      CORS_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN in docker/.env}
+    depends_on:
+      engine: {condition: service_started}
+      ws: {condition: service_started}
+      db-processor: {condition: service_started}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 7s
+      retries: 12
+  frontend:
+    <<: *app
+    mem_limit: 128m
+    build: {context: .., dockerfile: docker/frontend.Dockerfile}
+    ports: ['127.0.0.1:${APP_PORT:-8080}:8080']
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/healthz']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  market-maker:
+    <<: *app
+    build: {context: .., dockerfile: docker/service.Dockerfile, args: {SERVICE: market-maker}}
+    environment: {API_BASE_URL: 'http://api:3000', MARKET: SOL_INR, TOTAL_BIDS: 8, TOTAL_ASKS: 8, INTERVAL_MS: 1500}
+    depends_on:
+      api: {condition: service_healthy}
+volumes:
+  redis-data:
+  engine-state:

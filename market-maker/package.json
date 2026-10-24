@@ -15,11 +15,11 @@
   "type": "module",
   "dependencies": {
     "axios": "^1.12.2",
-    "dotenv": "^17.4.2",
-    "typescript": "^5.9.3"
+    "dotenv": "^17.4.2"
   },
   "devDependencies": {
-    "@types/node": "^26.3.0"
+    "@types/node": "^26.3.0",
+    "typescript": "^5.9.3"
   },
   "private": true,
   "engines": {

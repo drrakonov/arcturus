@@ -25,13 +25,11 @@ npm-debug.log*
 .env.*
 !.env.example
 
-# Private local development tracking
-/PROGRESS.md
-
 # Keep public documentation in the root README only
 /docs/
 *.[mM][dD]
 !/README.md
-# Browser test output
-/frontend/test-results/
-/frontend/playwright-report/
+
+# Atomic snapshot and private reset backups
+**/snapshot.json.*.tmp
+*.reset-*.bak

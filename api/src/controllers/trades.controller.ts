@@ -1,8 +1,7 @@
 import type { Request, Response } from "express";
-import { queryInteger, queryMarket } from './history-query.js';
-import { commandError } from './engine-response.js';
+import { queryInteger, queryMarket } from "./history-query.js";
+import { commandError } from "./engine-response.js";
 import { getPgPool } from "../managers/pgManager.js";
-
 
 export const getTrades = async (req: Request, res: Response) => {
     try {
@@ -29,14 +28,14 @@ export const getTrades = async (req: Request, res: Response) => {
 
         return res.status(200).json({
             success: true,
-            payload: rows.map((r) => ({
-                id:           r.id,
-                price:        r.price,
-                quantity:     r.quantity,
-                quoteQty:     r.quoteQty,
+            payload: rows.map(r => ({
+                id: r.id,
+                price: r.price,
+                quantity: r.quantity,
+                quoteQty: r.quoteQty,
                 isBuyerMaker: r.isBuyerMaker,
-                timestamp:    Number(r.timestamp),
-            })),
+                timestamp: Number(r.timestamp)
+            }))
         });
     } catch (err) {
         return commandError(res, err);

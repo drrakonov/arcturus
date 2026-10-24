@@ -1,9 +1,9 @@
 import pg from "pg";
 
-
 export function retentionDays() {
-    const value = process.env.TRADE_RETENTION_DAYS ?? '7';
-    if (!/^[0-9]+$/.test(value) || +value < 1 || +value > 30) throw new Error('TRADE_RETENTION_DAYS must be 1–30');
+    const value = process.env.TRADE_RETENTION_DAYS ?? "7";
+    if (!/^[0-9]+$/.test(value) || +value < 1 || +value > 30)
+        throw new Error("TRADE_RETENTION_DAYS must be 1–30");
     return +value;
 }
 
@@ -19,15 +19,17 @@ let pool: InstanceType<typeof Pool> | null = null;
 export function getPool(): InstanceType<typeof Pool> {
     if (!pool) {
         pool = new Pool({
-            max: 4, connectionTimeoutMillis: 3000, statement_timeout: 10000,
+            max: 4,
+            connectionTimeoutMillis: 3000,
+            statement_timeout: 10000,
             host: process.env.POSTGRES_HOST ?? "localhost",
             port: Number(process.env.POSTGRES_PORT ?? 5432),
             database: process.env.POSTGRES_DB ?? "my_database",
             user: process.env.POSTGRES_USER ?? "your_user",
-            password: process.env.POSTGRES_PASSWORD ?? "your_password",
+            password: process.env.POSTGRES_PASSWORD ?? "your_password"
         });
 
-        pool.on("error", (err) => {
+        pool.on("error", err => {
             console.error("[db] Idle client error:", err);
         });
     }
@@ -44,7 +46,6 @@ export async function closePool(): Promise<void> {
         console.log("[db] Pool closed.");
     }
 }
-
 
 export async function runMigrations(): Promise<void> {
     const days = retentionDays();
@@ -134,10 +135,15 @@ export async function runMigrations(): Promise<void> {
         `);
 
         // Cover delayed/replayed fills within the retained window, including recent bars.
-        await client.query("SELECT remove_continuous_aggregate_policy('klines_1m', if_exists => TRUE)");
-        await client.query(`SELECT add_continuous_aggregate_policy('klines_1m',
+        await client.query(
+            "SELECT remove_continuous_aggregate_policy('klines_1m', if_exists => TRUE)"
+        );
+        await client.query(
+            `SELECT add_continuous_aggregate_policy('klines_1m',
             start_offset => $1::interval, end_offset => INTERVAL '1 minute',
-            schedule_interval => INTERVAL '1 minute')`, [`${days} days`]);
+            schedule_interval => INTERVAL '1 minute')`,
+            [`${days} days`]
+        );
 
         // Compression is a storage policy, not a measured savings claim.
         await client.query(`
@@ -160,11 +166,19 @@ export async function runMigrations(): Promise<void> {
         await client.query("SELECT remove_retention_policy('trades', if_exists => TRUE)");
         await client.query("SELECT add_retention_policy('trades', $1::interval)", [`${days} days`]);
         await client.query("SELECT remove_retention_policy('klines_1m', if_exists => TRUE)");
-        await client.query("SELECT add_retention_policy('klines_1m', $1::interval)", [`${days} days`]);
+        await client.query("SELECT add_retention_policy('klines_1m', $1::interval)", [
+            `${days} days`
+        ]);
         await client.query("SELECT set_chunk_time_interval('trades', INTERVAL '1 day')");
         console.log(`[db] Migrations complete. Retention: ${days}d, Compression: after 1h.`);
     } catch (err) {
-        try { await client.query("ROLLBACK"); } catch { /* DDL may already be committed. */ }
+        try {
+            await client.query("ROLLBACK");
+        } catch {
+            /* DDL may already be committed. */
+        }
         throw err;
-    } finally { client.release(); }
+    } finally {
+        client.release();
+    }
 }

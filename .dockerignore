@@ -6,3 +6,8 @@
 **/*.tsbuildinfo
 .git
 assets
+
+**/*.md
+**/*.reset-*.bak
+**/*.tmp
+**/*.log

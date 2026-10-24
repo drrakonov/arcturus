@@ -1,1 +1,6 @@
-export type { WsMessage, TickerUpdateMessage, DepthUpdateMessage, TradeAddedMessage } from "@arcturus/contracts";
+export type {
+    WsMessage,
+    TickerUpdateMessage,
+    DepthUpdateMessage,
+    TradeAddedMessage
+} from "@arcturus/contracts";
