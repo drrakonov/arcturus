@@ -37,8 +37,6 @@ export interface MarketSnapshot {
 export type MessageFromApi = {
     type: 'MARKET_ORDER'; data: { market: string; protectionPrice: string; quantity: string; side: 'buy' | 'sell'; userId: string }
 } | {
-    type: 'RUN_SCENARIO'; data: { userId: string; scenario: ScenarioKind }
-} | {
     type: 'CREATE_ACCOUNT' | 'GET_ACCOUNT', data: { userId: string }
 } | {
     type: 'GET_MARKET', data: { market: string }
@@ -82,7 +80,7 @@ export type MessageFromApi = {
         baseAsset: string   // e.g. "ETH" — quote asset is always INR
     }
 }
-export type MessageToApi = { type: 'SCENARIO'; payload: ScenarioResult } | {
+export type MessageToApi = {
     type: 'ACCOUNT', payload: AccountSnapshot
 } | {
     type: 'MARKET', payload: MarketSnapshot
@@ -156,29 +154,10 @@ export type TradeAddedMessage = {
     }
 }
 
-export type WsMessage = { stream: string; data: { e: 'trace'; event: TraceEvent; forwardedAt?: number } } | TickerUpdateMessage | DepthUpdateMessage | TradeAddedMessage |
+export type WsMessage = TickerUpdateMessage | DepthUpdateMessage | TradeAddedMessage |
     { stream: string; data: { e: 'account'; snapshot: AccountSnapshot } } |
     { stream: string; data: { e: 'market'; snapshot: MarketSnapshot } };
 
-export const SUBSCRIBE = "SUBSCRIBE";
-export const UNSUBSCRIBE = "UNSUBSCRIBE";
-
-export type SubscribeMessage = {
-    method: typeof SUBSCRIBE,
-    params: string[]
-}
-
-export type UnsubscribeMessage = {
-    method: typeof UNSUBSCRIBE,
-    params: string[]
-}
-
-export type IncomingMessage = SubscribeMessage | UnsubscribeMessage;
-// Type constants — must match what the engine publishes
-export const TRADE_ADDED = "TRADE_ADDED" as const;
-export const ORDER_UPDATE = "ORDER_UPDATE" as const;
-
-// ---------- TRADE_ADDED payload ----------
 export interface TradeAddedData {
     id: string;
     isBuyerMaker: boolean;
@@ -189,34 +168,7 @@ export interface TradeAddedData {
     market: string;
 }
 
-// ---------- ORDER_UPDATE payload ----------
-// Full update (new order placed)
-export interface OrderUpdateDataFull {
-    orderId: string;
-    executedQty: number;
-    market: string;
-    price: string;
-    quantity: string;
-    side: "buy" | "sell";
-}
-
-// Partial update (only fill progress for an existing order)
-export interface OrderUpdateDataPartial {
-    orderId: string;
-    executedQty: number;
-    market?: undefined;
-    price?: undefined;
-    quantity?: undefined;
-    side?: undefined;
-}
-
-export type OrderUpdateData = OrderUpdateDataFull | OrderUpdateDataPartial;
-
-// ---------- Discriminated union of all DB messages ----------
-export type DbMessage =
-    | { type: typeof TRADE_ADDED; data: TradeAddedData }
-    | { type: typeof ORDER_UPDATE; data: OrderUpdateData }
-    | PersistenceBatch;
+export type DbMessage = PersistenceBatch;
 
 // One committed engine command becomes one database transaction. Quantities are exact strings.
 export interface HistoryOrder {
@@ -230,22 +182,10 @@ export interface HistoryTrade extends TradeAddedData {
 }
 export interface PersistenceBatch {
     type: 'PERSISTENCE_BATCH'; version: 1; eventId: string; historyId: string;
-    revision: number; timestamp: number; traceId?: string; orders: HistoryOrder[]; trades: HistoryTrade[];
+    revision: number; timestamp: number; orders: HistoryOrder[]; trades: HistoryTrade[];
 }
 export interface HistoryPage<T> { rows: T[]; nextCursor: string | null }
 
-export type ScenarioKind = 'partial-fill' | 'price-improvement' | 'fifo';
-export interface ScenarioResult {
-    scenario: ScenarioKind; historyId: string; market: string; inspectedOrderId: string;
-    steps: { label: string; orderId: string; executedQty: number; cancelledQty?: number }[];
-    fills: { makerOrderId: string; takerOrderId: string; price: string; quantity: string }[];
-    orders: HistoryOrder[];
-}
-export interface TraceEvent {
-    id: string; traceId: string; at: number;
-    stage: 'api_received' | 'queued' | 'engine_committed' | 'engine_rejected' | 'engine_replayed' | 'api_replied' | 'db_committed' | 'db_failed';
-    orderId?: string; eventId?: string;
-}
 export interface ExecutionDetails {
     order: HistoryOrder;
     summary: { fillCount: number; executedQuantity: string; quoteQuantity: string; averagePrice: string | null; priceImprovement: string };

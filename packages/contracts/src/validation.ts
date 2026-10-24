@@ -42,10 +42,6 @@ export function validateMessage(value: unknown): MessageFromApi {
             throw new TradingError('INVALID_REQUEST', 'Invalid market');
     }
     switch (type) {
-        case 'RUN_SCENARIO':
-            identifier(data.userId, 'userId');
-            if (!['partial-fill', 'price-improvement', 'fifo'].includes(data.scenario)) throw new TradingError('INVALID_REQUEST', 'Unknown scenario');
-            break;
         case 'MARKET_ORDER':
         case 'CREATE_ORDER':
             identifier(data.userId, 'userId');

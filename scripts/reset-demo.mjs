@@ -23,7 +23,7 @@ export async function resetDemo({redisUrl,snapshotPath,confirmed}) {
     acquired=true;
     for(const key of ['message','db_processor','db_processor:processing','db_processor:failed'])
       if(await redis.lLen(key))throw new Error(`Reset refused: ${key} is not empty. Drain or inspect it first.`);
-    const keys=[...await redis.keys('demo:session:*'),...await redis.keys('trace:*'),'demo:pause','demo:pause-cooldown','demo:worker-paused'];
+    const keys=await redis.keys('demo:session:*');
     let backup=null;
     try {await access(snapshotPath);backup=`${snapshotPath}.reset-${Date.now()}-${owner}.bak`;await copyFile(snapshotPath,backup,constants.COPYFILE_EXCL);}
     catch(error){if(error.code!=='ENOENT')throw error;}

@@ -1,4 +1,4 @@
-import { EngineeringLab, ExecutionInspector } from './EngineeringLab';
+import { ExecutionInspector } from './ExecutionInspector';
 import { useState, useEffect } from 'react';
 import { ArrowUpRight, Activity } from 'lucide-react';
 import { Tabs } from './components/Tabs';
@@ -84,7 +84,6 @@ export default function Terminal() {
         {tab === 'history' ? <History key={t.session?.token} token={t.session?.token} revision={t.account?.revision} onInspect={setInspected}/> : tab === 'orders' ? <div className="table-scroll" data-native-scroll><table><thead><tr><th>Market</th><th>Side</th><th>Limit price</th><th>Amount</th><th>Filled</th><th>Remaining</th><th/></tr></thead><tbody>{t.account?.openOrders.map(order => <tr key={order.orderId}><td>{order.market.replace('_', ' / ')}</td><td className={`${order.side}-text`}>{order.side.toUpperCase()}</td><td>₹{fmt(order.price)}</td><td>{fmt(order.quantity, 4)}</td><td>{fmt(order.filled, 4)}</td><td>{fmt(order.quantity - order.filled, 4)}</td><td><button onClick={()=>setInspected(order.orderId)}>Inspect</button><button className="cancel" disabled={disabled} onClick={() => t.mutate('DELETE', { market: order.market, orderId: order.orderId }, `cancel ${order.orderId}`)}>{t.busy && t.pending?.label === `cancel ${order.orderId}` ? 'Cancelling…' : 'Cancel'}</button></td></tr>)}</tbody></table>{!t.account?.openOrders.length && <div className="empty compact"><strong>{t.account ? 'No open orders' : 'Loading your account…'}</strong><p>{t.account ? 'Place a limit order above. Unfilled orders will appear here.' : 'Connecting to your virtual balances and open orders.'}</p></div>}</div> : <div className="balance-grid">{Object.entries(balance ?? {}).map(([symbol, b]) => <div className="balance-card" key={symbol}><div className="asset-symbol">{symbol === 'SOL' && <img src="/solana.svg" alt="" width="22" height="18"/>}{symbol}</div><span>Available<strong data-testid={`balance-${symbol}`}>{fmt(b.available, symbol === 'INR' ? 2 : 4)}</strong></span><span>In orders<strong>{fmt(b.locked, symbol === 'INR' ? 2 : 4)}</strong></span></div>)}</div>}
       </section><div className="notice" role="status" aria-live="polite">{t.notice || 'Orders and balances are private to this demo account.'}</div>
       {inspected && <ExecutionInspector key={inspected} orderId={inspected} token={t.session?.token} onClose={()=>setInspected(null)}/>}
-      <EngineeringLab token={t.session?.token} traces={t.traces} connected={t.status === 'live'} onInspect={setInspected}/>
     </main><footer><span>✦ ARCTURUS <span className="subtle">Exchange demo</span></span><span>Simulated assets only <i/> No real-money trading</span></footer>
   </div>;
 }

@@ -16,9 +16,9 @@ async function main() {
     const stopHeartbeat = await startHeartbeat(redisClient,'engine',error=>{ console.error('[engine] Runtime unavailable:',error); shutdown('runtime failure',1); });
     const snapshotPath = process.env.SNAPSHOT_PATH || './snapshot.json';
     const restore = process.env.WITH_SNAPSHOT;
-    if (restore && restore !== '1') throw new Error('WITH_SNAPSHOT must be empty or 1');
+    if (restore && restore !== '1' && restore !== 'auto') throw new Error('WITH_SNAPSHOT must be empty, 1 or auto');
     const engine = new Engine({ sink: RedisManager.getInstance(),
-        ...(restore === '1' ? { snapshot: JSON.parse(fs.readFileSync(snapshotPath, 'utf8')) } : {}) });
+        ...((restore === '1' || (restore === 'auto' && fs.existsSync(snapshotPath))) ? { snapshot: JSON.parse(fs.readFileSync(snapshotPath, 'utf8')) } : {}) });
     const saveSnapshot = () => atomicSnapshot(snapshotPath, engine.getSnapshot());
     const snapshotTimer = setInterval(() => {
         try { saveSnapshot(); } catch (error) { console.error('[engine] Snapshot failed:', error); shutdown('snapshot failure',1); }

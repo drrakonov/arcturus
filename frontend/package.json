@@ -23,7 +23,6 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/three": "^0.186.0",
