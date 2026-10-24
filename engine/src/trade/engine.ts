@@ -59,7 +59,7 @@ export class Engine {
         return book;
     }
     // One synchronous transaction per command. Publish failures cannot turn a committed
-    // trade into a business rejection; durable delivery/replay remains a later milestone.
+    // trade into a business rejection; event delivery failures are logged separately.
     private emit(action: () => void) {
         try { action(); } catch (error) { console.error('Engine event delivery failed after commit', error); }
     }
@@ -351,7 +351,7 @@ export class Engine {
             usedTxnIds: [...this.usedTxnIds] };
     }
     private restore(snapshot: any) {
-        if (snapshot?.version !== 2) throw new Error('Incompatible snapshot: Milestone 1 requires version 2; start a fresh isolated demo');
+        if (snapshot?.version !== 2) throw new Error('Incompatible snapshot: expected version 2; preserve the existing snapshot before starting a fresh demo');
         if (snapshot.orderbooks?.some((book: any) => book.baseAsset === 'TATA')) {
             throw new Error('Legacy TATA snapshot: preserve it and start a fresh SOL demo with WITH_SNAPSHOT empty; assets and executions are not converted');
         }
