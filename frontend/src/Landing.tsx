@@ -5,11 +5,24 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Lenis from "lenis";
 import "lenis/dist/lenis.css";
 import { Galaxy } from "./components/Galaxy";
+import { apiUrl, wakeBackendEnabled } from "./client";
+import { wakeBackend } from "./wakeBackend";
 import "./landing.css";
 
 gsap.registerPlugin(ScrollTrigger);
 
 export default function Landing() {
+    useEffect(() => {
+        if (!wakeBackendEnabled) return;
+
+        const controller = new AbortController();
+        void wakeBackend(apiUrl, controller.signal).catch(() => {
+            // The landing page stays usable even when trading services are unavailable.
+        });
+
+        return () => controller.abort();
+    }, []);
+
     const root = useRef<HTMLDivElement>(null);
     const journey = useRef<HTMLElement>(null);
     const [paused, setPaused] = useState(false);

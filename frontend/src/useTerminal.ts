@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mergeMarket } from "./market";
-import { ApiError, newer, request, wsUrl } from "./client";
+import { ApiError, apiUrl, newer, request, wakeBackendEnabled, wsUrl } from "./client";
+import { wakeBackend } from "./wakeBackend";
 import type { AccountSnapshot, MarketSnapshot, PendingAction, Session } from "./client";
 
 export function useTerminal() {
@@ -23,12 +24,22 @@ export function useTerminal() {
     const inFlight = useRef(false);
     useEffect(() => {
         let cancelled = false;
-        setStatus("connecting");
+        const controller = new AbortController();
+        setStatus(wakeBackendEnabled ? "waking" : "connecting");
         setError("");
         const token = sessionStorage.getItem("arcturus-token") || undefined;
-        request<Session>("/api/v1/session", token, { method: "POST" })
-            .then(value => {
+        const ready = wakeBackendEnabled
+            ? wakeBackend(apiUrl, controller.signal)
+            : Promise.resolve();
+
+        ready
+            .then(() => {
                 if (cancelled) return;
+                setStatus("connecting");
+                return request<Session>("/api/v1/session", token, { method: "POST" });
+            })
+            .then(value => {
+                if (cancelled || !value) return;
                 sessionStorage.setItem("arcturus-token", value.token);
                 setSession(value);
             })
@@ -40,6 +51,7 @@ export function useTerminal() {
             });
         return () => {
             cancelled = true;
+            controller.abort();
         };
     }, [attempt]);
     useEffect(() => {
