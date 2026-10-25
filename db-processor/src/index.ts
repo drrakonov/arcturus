@@ -22,13 +22,16 @@ async function main() {
         return;
     }
     let stopping = false;
-    const stopHeartbeat = await startHeartbeat(redis, "worker", error => {
-        console.error("[worker] Runtime unavailable:", error);
-        stopping = true;
-    });
-    // A dedicated PostgreSQL session enforces the single-worker assumption.
+    let stopHeartbeat = async () => {};
+    // One consumer per Redis queue. Combined deployments use isolated local queues.
     const lock = await getPool().connect();
-    const acquired = await lock.query("SELECT pg_try_advisory_lock(7283103) AS acquired");
+    const lockScope = process.env.WORKER_LOCK_SCOPE;
+    const acquired = await lock.query(
+        lockScope
+            ? "SELECT pg_try_advisory_lock(7283103, hashtext($1)) AS acquired"
+            : "SELECT pg_try_advisory_lock(7283103) AS acquired",
+        lockScope ? [lockScope] : []
+    );
     if (!acquired.rows[0].acquired) throw new Error("Another database worker is already running");
     lock.on("error", () => {
         stopping = true;
@@ -41,6 +44,10 @@ async function main() {
     try {
         console.log("[db-processor] Running migrations…");
         await runMigrations();
+        stopHeartbeat = await startHeartbeat(redis, "worker", error => {
+            console.error("[worker] Runtime unavailable:", error);
+            stopping = true;
+        });
         console.log(`[db-processor] Waiting for messages on "${QUEUE}"…`);
         let nextPrune = 0;
         while (!stopping) {
@@ -85,7 +92,14 @@ async function main() {
         // Leave any unacknowledged claim for the next worker, including on SIGTERM.
         await stopHeartbeat();
         await redis.quit();
-        await lock.query("SELECT pg_advisory_unlock(7283103)").catch(() => {});
+        await lock
+            .query(
+                lockScope
+                    ? "SELECT pg_advisory_unlock(7283103, hashtext($1))"
+                    : "SELECT pg_advisory_unlock(7283103)",
+                lockScope ? [lockScope] : []
+            )
+            .catch(() => {});
         lock.release();
         await closePool();
     }

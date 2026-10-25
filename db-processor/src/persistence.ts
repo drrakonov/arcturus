@@ -168,6 +168,12 @@ export async function persistBatch(value: unknown): Promise<void> {
 
 export async function pruneHistory() {
     const days = retentionDays();
+    if (process.env.DATABASE_MODE === "postgres") {
+        await getPool().query(
+            `DELETE FROM trades WHERE timestamp < NOW() - $1 * INTERVAL '1 day'`,
+            [days]
+        );
+    }
     await getPool().query(
         `DELETE FROM processed_events WHERE occurred_at < NOW() - $1 * INTERVAL '1 day'`,
         [days]

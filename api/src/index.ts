@@ -71,7 +71,7 @@ app.post("/api/v1/markets", (_req, res) =>
         .json({ success: false, code: "FORBIDDEN", message: "Market creation is internal" })
 );
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
 
 app.get("/", (req, res) => {
     return res.send("API Server is running...🚀");
@@ -95,7 +95,7 @@ async function main() {
         console.error("[api] Runtime unavailable:", error);
         void stop(1);
     });
-    const server = app.listen(PORT, () => {
+    const server = app.listen(PORT, process.env.HOST || "0.0.0.0", () => {
         console.log(`API Server listening on port ${PORT}`);
     });
     process.once("SIGTERM", () => void stop());

@@ -96,6 +96,7 @@ export default function Terminal() {
                                 {
                                     live: "Live connection",
                                     connecting: "Connecting",
+                                    waking: "Starting trading services",
                                     reconnecting: "Reconnecting",
                                     failed: "Connection failed",
                                     expired: "Session expired"
@@ -195,6 +196,12 @@ export default function Terminal() {
                         <button onClick={t.retry} disabled={t.status !== "live"}>
                             Retry same request
                         </button>
+                    </div>
+                )}
+                {t.status === "waking" && (
+                    <div className="notice" role="status">
+                        Starting trading services. This can take about a minute after inactivity.
+                        The terminal will connect automatically when ready.
                     </div>
                 )}
                 {t.status === "reconnecting" && (
