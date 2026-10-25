@@ -31,7 +31,7 @@ async function main() {
     wss.on("connection", ws => {
         UserManager.getInstance().addUser(ws);
     });
-    server.listen(PORT || 3001);
+    server.listen(PORT || 3001, process.env.HOST || "0.0.0.0");
     let stopping = false;
     async function stop(code = 0) {
         if (stopping) return;

@@ -18,10 +18,20 @@ let pool: InstanceType<typeof Pool> | null = null;
  */
 export function getPool(): InstanceType<typeof Pool> {
     if (!pool) {
+        let connectionString = process.env.DATABASE_URL;
+        if (connectionString && process.env.POSTGRES_SSL === "true") {
+            const url = new URL(connectionString);
+            // URL SSL options must not override certificate verification.
+            for (const key of ["sslmode", "ssl", "sslcert", "sslkey", "sslrootcert"])
+                url.searchParams.delete(key);
+            connectionString = url.toString();
+        }
         pool = new Pool({
             max: 4,
             connectionTimeoutMillis: 3000,
             statement_timeout: 10000,
+            connectionString,
+            ssl: process.env.POSTGRES_SSL === "true" ? { rejectUnauthorized: true } : undefined,
             host: process.env.POSTGRES_HOST ?? "localhost",
             port: Number(process.env.POSTGRES_PORT ?? 5432),
             database: process.env.POSTGRES_DB ?? "my_database",
@@ -49,8 +59,13 @@ export async function closePool(): Promise<void> {
 
 export async function runMigrations(): Promise<void> {
     const days = retentionDays();
+    const mode = process.env.DATABASE_MODE ?? "timescale";
+    if (!["postgres", "timescale"].includes(mode))
+        throw new Error("DATABASE_MODE must be postgres or timescale");
     const client = await getPool().connect();
     try {
+        // Serialize migrations across independent demo instances sharing one database.
+        await client.query("SELECT pg_advisory_lock(7283104)");
         // ── Pass 1: plain table DDL inside a transaction ──────────────────────────
         await client.query("BEGIN");
 
@@ -104,6 +119,11 @@ export async function runMigrations(): Promise<void> {
         `);
 
         await client.query("COMMIT");
+
+        if (mode === "postgres") {
+            console.log(`[db] PostgreSQL migrations complete. Retention: ${days}d.`);
+            return;
+        }
 
         // ── Pass 2: TimescaleDB-specific DDL — must NOT be inside a transaction ──
         //    Each statement is auto-committed by the server.
@@ -179,6 +199,7 @@ export async function runMigrations(): Promise<void> {
         }
         throw err;
     } finally {
+        await client.query("SELECT pg_advisory_unlock(7283104)").catch(() => {});
         client.release();
     }
 }

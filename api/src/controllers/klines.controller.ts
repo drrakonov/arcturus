@@ -22,7 +22,7 @@ export async function getKlines(req: Request, res: Response) {
         // Sequence breaks ties when multiple fills share a millisecond.
         const { rows } = await getPgPool().query(
             `SELECT extract(epoch FROM bucket) AS time, open,high,low,close,volume FROM (
-            SELECT time_bucket($1::interval,timestamp) AS bucket,
+            SELECT date_bin($1::interval,timestamp,TIMESTAMPTZ '2000-01-01') AS bucket,
                 (array_agg(price ORDER BY timestamp,sequence,id))[1] AS open,
                 max(price) AS high,min(price) AS low,
                 (array_agg(price ORDER BY timestamp DESC,sequence DESC,id DESC))[1] AS close,sum(quantity) AS volume

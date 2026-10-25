@@ -86,3 +86,53 @@ service heartbeats. Readiness does not guarantee every asynchronous write succee
   and retains SQL history. Never reset a running market.
 
 Resource limits are configured, not cloud capacity guarantees.
+
+## Render backend + Vercel frontend
+
+Use one Render **Docker Web Service**, one instance, with Dockerfile
+`docker/render.Dockerfile` and build context at the repository root. Set its health
+check path to `/readyz`. Leave the Docker command unset. The container runs Nginx,
+private in-memory Redis, API, WebSocket server, engine, worker, and simulator.
+Only Nginx listens publicly on Render's `PORT` (default 10000).
+
+Create an external PostgreSQL 14+ database and set these Render environment variables:
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | Provider's direct PostgreSQL connection URL, stored as a secret |
+| `POSTGRES_SSL` | `true` for a remote database with a trusted TLS certificate |
+| `DATABASE_MODE` | `postgres` |
+| `CORS_ORIGIN` | `https://arcturus-tau.vercel.app` (no trailing slash) |
+| `TRADE_RETENTION_DAYS` | `7` |
+
+Use a **direct connection**, not a transaction-mode connection pooler: worker and
+migration coordination use session advisory locks. Standard PostgreSQL mode uses
+raw fills for candle queries and scheduled deletes for retention; TimescaleDB remains
+the default for the existing Compose setup. Do not set an external `REDIS_URL` or
+snapshot recovery options for the combined container; it deliberately uses private,
+fresh state. Do not expose internal ports 3000, 3001, or 6379.
+
+In Vercel, set the following build environment variables, then redeploy the frontend:
+
+```text
+VITE_API_URL=https://YOUR-SERVICE.onrender.com
+VITE_WS_URL=wss://YOUR-SERVICE.onrender.com/ws
+VITE_WAKE_BACKEND=true
+```
+
+Landing visits request backend readiness while the page stays usable; the terminal
+waits up to 90 seconds and offers retry on failure. Render Free sleeps after idle
+periods, so waking is not instant. Free Render PostgreSQL expires after 30 days;
+choose a longer-lived external database for continued use.
+
+Each container restart starts a **fresh demo**: old sessions expire, balances reset,
+and open books disappear. Previously committed SQL history remains until retention
+removes it; it is not restored into the new market or attached to new guest accounts.
+Old order history describes the previous demo, not currently active orders. Rolling
+deployments can briefly serve two isolated demos; clients may need a new session.
+Graceful shutdown drains pending history writes, but crashes or forced shutdown can
+lose events not yet committed to PostgreSQL, including quarantined failures.
+
+Verify `/readyz`, a session and trade, WebSocket updates, restart/session expiry, and
+resource usage on the actual deployment. Heap and Redis caps do not guarantee the
+combined service fits Render Free's memory/CPU allocation under load.

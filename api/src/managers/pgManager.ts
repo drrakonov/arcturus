@@ -10,10 +10,20 @@ let pool: InstanceType<typeof Pool> | null = null;
  */
 export function getPgPool(): InstanceType<typeof Pool> {
     if (!pool) {
+        let connectionString = process.env.DATABASE_URL;
+        if (connectionString && process.env.POSTGRES_SSL === "true") {
+            const url = new URL(connectionString);
+            // URL SSL options must not override certificate verification.
+            for (const key of ["sslmode", "ssl", "sslcert", "sslkey", "sslrootcert"])
+                url.searchParams.delete(key);
+            connectionString = url.toString();
+        }
         pool = new Pool({
             max: 4,
             connectionTimeoutMillis: 3000,
             statement_timeout: 5000,
+            connectionString,
+            ssl: process.env.POSTGRES_SSL === "true" ? { rejectUnauthorized: true } : undefined,
             host: process.env.POSTGRES_HOST ?? "localhost",
             port: Number(process.env.POSTGRES_PORT ?? 5432),
             database: process.env.POSTGRES_DB ?? "my_database",
