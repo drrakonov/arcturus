@@ -38,6 +38,14 @@ Compose owns the database worker; do not start a second worker or matching engin
 
 ## Built application
 
+For a frontend hosted separately on Vercel, set `VITE_API_URL` to the backend HTTPS
+origin and `VITE_WS_URL` to its WSS endpoint. For a sleeping backend, also set
+`VITE_WAKE_BACKEND=true` and rebuild the frontend. Landing-page visits then request
+`/readyz` in the background for up to 90 seconds; the terminal waits for readiness
+before creating a session. Polling stops on readiness, navigation, or timeout.
+Allow the frontend origin in the API's `CORS_ORIGIN`. This does not provide durable
+storage or start separately hosted workers; those need their own deployment setup.
+
 The application overlay builds all services and serves the compiled frontend through
 Nginx, proxying `/api` and `/ws` on the same origin. The database, Redis, and engine
 snapshot use named volumes. Do not reuse an existing PostgreSQL volume with different
